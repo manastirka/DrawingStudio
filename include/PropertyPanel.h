@@ -8,16 +8,21 @@
 #include <QSpinBox>
 #include <QDoubleSpinBox>
 #include <QComboBox>
+#include <QFontComboBox>
 #include <QSlider>
 #include <QPushButton>
 #include <QColorDialog>
 #include <QGroupBox>
 #include <QScrollArea>
 #include <QFormLayout>
+#include <QTextEdit>
 #include <memory>
 
-class GuitarComponent;
+#include "DrawingCanvas.h" // for DrawingTool
+
 class DrawingPrimitive;
+class SimpleTextPanel;
+class ClassicTextTool;
 
 class ColorButton : public QPushButton
 {
@@ -48,12 +53,19 @@ class PropertyPanel : public QWidget
 public:
     explicit PropertyPanel(QWidget* parent = nullptr);
     
-    void showComponentProperties(GuitarComponent* component);
-    void showPrimitiveProperties(DrawingPrimitive* primitive);
-    void showPromotedComponentProperties(DrawingPrimitive* primitive, const QString& componentType, const QString& componentName);
+    void showPrimitiveProperties(DrawingPrimitive* primitive, class DrawingCanvas* canvas = nullptr);
     void showMultiplePrimitiveProperties(const std::vector<DrawingPrimitive*>& primitives);
+    void showCanvasProperties(class DrawingCanvas* canvas);
+    void showToolProperties(DrawingTool tool, class DrawingCanvas* canvas);
     void clearProperties();
     void refreshCurrentProperties();
+    
+    // Tool wiring
+    void setTextTool(ClassicTextTool* textTool);
+    
+    // Real-time text controls access
+    SimpleTextPanel* getSimpleTextPanel() const { return m_simpleTextPanel; }
+    void showTextControls();
     
 signals:
     void propertyChanged(const QString& objectName, const QString& propertyName, const QVariant& value);
@@ -75,9 +87,13 @@ private:
     QFormLayout* m_formLayout;
     
     // Current object being edited
-    GuitarComponent* m_currentComponent;
     DrawingPrimitive* m_currentPrimitive;
     std::vector<DrawingPrimitive*> m_currentPrimitives;
+    class DrawingCanvas* m_currentCanvas;
+    
+    // Text tool UI
+    SimpleTextPanel* m_simpleTextPanel;
+    ClassicTextTool* m_textTool;
     QString m_currentObjectName;
     
     // Property editors
@@ -86,4 +102,3 @@ private:
     void clearLayout();
     QWidget* createEditor(const QString& propertyName, QMetaType::Type type, const QVariant& value);
 };
-

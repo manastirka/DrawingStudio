@@ -1,109 +1,109 @@
-# Guitar Builder CAD Application 🎸
+# Drawing Studio 🎨
 
-A professional CAD application for guitar design and visualization built with Qt6 and C++20.
+A professional drawing and design application built with Qt6 and C++20. Create precise technical drawings, artistic illustrations, and complex diagrams with an intuitive interface and powerful tools.
 
-## 🚀 Features Implemented
+## 🚀 Features
 
-### ✨ **New Guitar Component System**
-- **Draw-First Workflow**: Use drawing tools to create shapes, then promote them to guitar components
-- **Component Promotion**: Right-click selected shapes → "🎸 Promote to Guitar Component"
-- **No More Placeholders**: Only explicitly promoted objects become real guitar components
-- **Real Database Integration**: Access authentic guitar manufacturer specifications
+### 🎨 **Comprehensive Drawing Tools**
+- **Selection Tool (S)**: Select, move, and modify drawing objects
+- **Line Tool (L)**: Create precise straight lines with angle constraints
+- **Bezier Curve Tool (B)**: Create smooth curves with full control point manipulation
+- **Spline Tool (P)**: Create flowing curves through multiple points with tension control
+- **Rectangle Tool (R)**: Draw rectangles with optional rounded corners
+- **Ellipse Tool (E)**: Create circles and ellipses with precision
+- **Curve Tool (C)**: Advanced curve creation with multiple interpolation types
+- **Measure Tool (M)**: Add dimensions and measurements to your drawings
+- **Eraser Tool (X)**: Remove unwanted elements
 
-### 🎨 **Drawing Tools**
-- **Line Tool**: Create straight lines with snap-to-grid
-- **Bezier Curve Tool**: Create smooth curves with control points
-- **Rectangle Tool**: Draw rectangular shapes
-- **Ellipse Tool**: Draw circular and elliptical shapes
-- **Spline Tool**: Create flowing curves through multiple points
-- **Selection Tool**: Select and modify existing elements
+### 📐 **Precision Features**
+- **Snap to Grid**: Automatic alignment to customizable grid
+- **Magnetic Connection**: Automatically connect line endpoints
+- **Multiple Grid Sizes**: Fine (1mm), Medium (2mm), Coarse (10mm)
+- **Multiple Units**: Millimeters, Centimeters, Inches
+- **Zoom Controls**: In, Out, Fit to View, Actual Size
+- **Coordinate Display**: Real-time cursor position tracking
 
-### 🎸 **Guitar Component Database**
-**Real specifications from major manufacturers:**
+### 🎯 **Advanced Object Properties**
 
-#### **Guitar Bodies** (5 models):
-- **Gibson Les Paul Body**: 350×480×45mm, mahogany with maple cap, 2.1kg
-- **Fender Stratocaster Body**: 325×460×44mm, alder/ash, 1.8kg
-- **Fender Telecaster Body**: 320×450×44mm, ash/alder, 1.9kg
-- **PRS Custom 24 Body**: 340×470×50mm, mahogany with maple top, 2.0kg
-- **Ibanez RG Body**: 315×445×43mm, basswood, 1.7kg
+#### **Universal Properties**
+- Color, Line Width, Visibility
+- Layer assignment and management
+- Transform controls (position, rotation, scale)
 
-#### **Guitar Necks** (6 models):
-- **Gibson Les Paul Neck**: 43mm nut, 628mm scale (24.75"), mahogany/rosewood
-- **Fender Stratocaster Neck**: 42mm nut, 648mm scale (25.5"), maple
-- **Fender Telecaster Neck**: 42.8mm nut, 648mm scale, maple
-- **PRS Custom 24 Neck**: 43mm nut, 635mm scale (25"), mahogany/rosewood
-- **Ibanez RG Neck**: 42mm nut, 648mm scale, thin Wizard profile
-- **Martin D-28 Neck**: 44.5mm nut, 648mm scale, rosewood/ebony
+#### **Shape-Specific Properties**
+- **Lines**: Length, angle adjustment, endpoint snapping
+- **Rectangles**: Width/height, corner radius, aspect ratio lock, fill options
+- **Ellipses**: Radius control, circular conversion, axes display, subdivision quality
+- **Bezier Curves**: Control point manipulation, tangent modes, subdivision quality
+- **Splines**: Smoothness, tension, interpolation type, point visibility
+- **Arcs**: Radius, start/end angles, direction control
 
-#### **Guitar Headstocks** (7 models):
-- **Gibson Les Paul**: 85×180mm, angled with crown inlay
-- **Fender Stratocaster**: 89×175mm, straight headstock
-- **PRS Custom 24**: 78×165mm, angled with bird logo
-- And more from major manufacturers...
+### 🖼️ **Blueprint Support**
+- **Load Background Images**: Import PNG, JPG, PDF as reference blueprints
+- **Opacity Control**: Adjust blueprint transparency for tracing
+- **Scale Adjustment**: Resize blueprints to match your project scale
+- **Auto-trace**: Generate outlines from blueprint images
 
-### 🔧 **Component Integration System**
+### 📋 **Project Management**
+- **Layer System**: Organize drawing elements across multiple layers
+- **Object Tree**: Hierarchical view of all drawing objects
+- **Save/Load Projects**: Custom .drawing file format
+- **Export Options**: Multiple format support for sharing
 
-#### **Property Panel Integration**:
-- **Auto-display properties** after component promotion
-- **Database-specific properties** instead of generic primitive properties
-- **"Open Database Properties" button** for detailed specifications
-- **Real manufacturer data** with dimensions, materials, prices
-
-#### **Left Panel ↔ Canvas Sync**:
-- **Bidirectional selection sync** between components tree and canvas
-- **Click component in tree** → highlights on canvas
-- **Select on canvas** → shows promoted component properties
-- **Component tracking system** maintains relationships
-
-### 🎯 **User Workflow**
-
-1. **🎨 Draw Guitar Outline**: Use Bezier/Ellipse tools to create guitar body shape
-2. **🎯 Select Shape**: Switch to selection tool and click the drawn shape
-3. **🎸 Promote to Component**: Right-click → "Promote to Guitar Component" → "Main Parts" → "Body"
-4. **✨ Automatic Properties**: Property panel opens showing database properties
-5. **📋 Database Access**: Click "Open Database Properties" → Select "Gibson Les Paul Body"
-6. **🔄 Perfect Sync**: Click "Body" in left tree → shape highlights on canvas
+### 🔧 **Professional Interface**
+- **Dockable Panels**: Objects, Properties, Layers
+- **Customizable Workspace**: Arrange panels to suit your workflow
+- **Status Bar**: Real-time coordinates, zoom level, and tool status
+- **Keyboard Shortcuts**: Speed up your workflow with hotkeys
+- **Dark Theme**: Professional appearance optimized for long work sessions
 
 ## 🛠 **Technical Architecture**
 
 ### **Core Classes**:
-- **DrawingCanvas**: Main drawing surface with OpenGL rendering
-- **ComponentDatabase**: Real guitar component specifications and database
-- **PropertyPanel**: Dynamic property editor for components
-- **MainWindow**: Application framework with docking panels
-- **DrawingPrimitive**: Base class for all drawable objects
+- **DrawingCanvas**: OpenGL-accelerated drawing surface with hardware rendering
+- **DrawingProject**: Project management with layer support and serialization
+- **PropertyPanel**: Dynamic property editor for all object types
+- **MainWindow**: Modern Qt application framework with docking system
+- **DrawingPrimitive**: Polymorphic base class for all drawable objects
 
-### **Component System**:
+### **Drawing System**:
 ```cpp
-struct ComponentInfo {
-    ComponentType type;        // Body, Neck, Headstock, etc.
-    QString subType;          // Specific model info
-    QString displayName;      // Full component name
+enum class PrimitiveType {
+    Line, Curve, BezierCurve, Spline,
+    Arc, Circle, Rectangle, Ellipse,
+    Polygon, Text, Dimension
 };
 
-// Component tracking maps
-std::map<DrawingPrimitive*, ComponentInfo> m_promotedComponents;
-std::map<QString, DrawingPrimitive*> m_componentNameToPrimitive;
+// Project structure
+class DrawingProject {
+    std::vector<std::unique_ptr<DrawingPrimitive>> primitives;
+    std::vector<std::pair<QString, QColor>> layers;
+    DrawingUnit units = DrawingUnit::Millimeters;
+    GridSize gridSize = GridSize::Medium;
+};
 ```
 
-### **New Component Types**:
-- **ComponentType::Body** - Guitar body components
-- **ComponentType::Neck** - Guitar neck components  
-- **ComponentType::Headstock** - Guitar headstock components
-- **Plus all existing types**: Pickups, Hardware, Electronics
-
-## 🎸 **Component Color System**
-- **Body**: Brown (`#8B4513`) 
-- **Neck/Headstock**: Saddle brown (`#A0522D`)
-- **Pickups**: Dark gray (humbuckers) / Cream (single coils)
-- **Hardware**: Silver, gold, bone colors by component type
+### **Key Design Patterns**:
+- **Command Pattern**: Full undo/redo support for all operations
+- **Observer Pattern**: Automatic UI updates when objects change
+- **Factory Pattern**: Extensible primitive creation system
+- **Strategy Pattern**: Multiple rendering and export strategies
 
 ## 📁 **Project Structure**
 ```
-GuitarBuilder/
+DrawingStudio/
 ├── include/           # Header files
-├── src/               # Source files  
+│   ├── DrawingCanvas.h
+│   ├── DrawingProject.h
+│   ├── DrawingPrimitive.h
+│   ├── PropertyPanel.h
+│   └── MainWindow.h
+├── src/               # Source files
+│   ├── main.cpp
+│   ├── MainWindow.cpp
+│   ├── DrawingCanvas.cpp
+│   ├── DrawingProject.cpp
+│   └── PropertyPanel.cpp
 ├── build/             # Build artifacts (ignored)
 ├── CMakeLists.txt     # CMake configuration
 ├── README.md          # This file
@@ -113,49 +113,85 @@ GuitarBuilder/
 ## 🔧 **Build Instructions**
 
 ### Prerequisites:
-- Qt6 (with OpenGL support)
-- CMake 3.20+
-- C++20 compatible compiler
+- **Qt6** (6.2 or later) with OpenGL support
+- **CMake** 3.20 or later
+- **C++20** compatible compiler (GCC 10+, Clang 10+, MSVC 2019+)
+- **OpenGL** 3.3 or later support
 
 ### Build:
 ```bash
+# Clone the repository
+git clone <repository-url>
+cd DrawingStudio
+
+# Create build directory
 mkdir build
 cd build
+
+# Configure with CMake
 cmake ..
-make
-./GuitarBuilder
+
+# Build
+make -j$(nproc)  # Linux/macOS
+# or
+make             # Single-threaded
+
+# Run
+./DrawingStudio
 ```
 
-## 🎯 **Recent Major Updates**
+### Windows (Visual Studio):
+```cmd
+mkdir build
+cd build
+cmake .. -G "Visual Studio 16 2019"
+cmake --build . --config Release
+.\Release\DrawingStudio.exe
+```
 
-### **Component Promotion System** ✅
-- Removed placeholder component creation
-- Added "Promote to Guitar Component" context menu
-- Only appears when drawing primitives are selected
-- Real guitar components with database access
+## 🎯 **Usage Guide**
 
-### **Property Panel Integration** ✅  
-- Auto-display properties after promotion
-- Database-specific property panels
-- "Open Database Properties" button integration
-- Real manufacturer specifications display
+### **Getting Started**
+1. **Create New Project**: File → New or Ctrl+N
+2. **Select Drawing Tool**: Use toolbar or keyboard shortcuts (S, L, B, etc.)
+3. **Draw Objects**: Click and drag on canvas to create shapes
+4. **Modify Properties**: Select objects to view/edit properties in right panel
+5. **Organize with Layers**: Use layers panel to organize complex drawings
+6. **Save Project**: File → Save or Ctrl+S
 
-### **Left Panel Sync** ✅
-- Bidirectional selection between tree and canvas
-- Component name to primitive mapping system
-- Visual selection feedback on canvas
-- Seamless workflow integration
+### **Advanced Techniques**
+- **Multi-Selection**: Hold Ctrl and click multiple objects
+- **Precision Drawing**: Enable grid snapping for accurate placement
+- **Blueprint Tracing**: Load reference image and trace over it
+- **Measurement**: Use measure tool for technical drawings
+- **Layer Management**: Group related elements on separate layers
 
 ## 🚀 **Key Benefits**
 
-- **🎨 Creative Freedom**: Draw any shape, then categorize as guitar component
-- **🎯 Intentional Design**: Only promoted objects become guitar components
-- **📋 Authentic Data**: Real guitar manufacturer specifications 
-- **🔄 Seamless Workflow**: Perfect integration between drawing and component systems
-- **🧹 Clean Interface**: No placeholder components cluttering the workspace
+- **🎨 Versatile**: Perfect for technical drawings, artistic illustrations, and diagrams
+- **⚡ Performance**: Hardware-accelerated OpenGL rendering for smooth interaction
+- **🔧 Professional**: Industry-standard tools and precision controls
+- **💾 Reliable**: Robust project format with full undo/redo support
+- **🎯 Intuitive**: Clean interface that doesn't get in your way
+- **🔍 Precise**: Sub-pixel accuracy with multiple coordinate systems
 
-## 🎵 **Perfect for Guitar Designers**
-Whether you're designing a custom Gibson Les Paul, Fender Stratocaster, or your own unique design, Guitar Builder provides the professional tools and authentic specifications you need to create accurate guitar blueprints.
+## 🎨 **Perfect For**
+- **Technical Illustrations**: Engineering drawings, schematics, diagrams
+- **Architectural Sketches**: Floor plans, elevations, detail drawings  
+- **Product Design**: Concept sketches, specification drawings
+- **Educational Materials**: Geometric diagrams, scientific illustrations
+- **Artistic Work**: Vector art, logo design, creative illustrations
+- **Documentation**: User manuals, instruction guides, workflows
+
+## 🛣️ **Roadmap**
+
+### **Upcoming Features**
+- **Text Tool**: Rich text with formatting options
+- **Symbol Library**: Reusable drawing components
+- **Advanced Export**: SVG, DXF, PDF export options
+- **Collaboration**: Real-time collaborative editing
+- **Scripting**: Python API for automation
+- **Templates**: Pre-built templates for common use cases
 
 ---
-**Built with ❤️ for guitar makers and designers** 🎸
+**Built with ❤️ for designers, engineers, and artists** 🎨

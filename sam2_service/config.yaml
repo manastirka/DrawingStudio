@@ -1,0 +1,41 @@
+# Hybrid Masking Configuration - Optimized for Speed
+# Target: <150ms for 1080p on M3 Pro
+
+input:
+  max_side: 512  # Downscale for fast saliency (was 1024)
+  
+saliency:
+  backend: "opencv_saliency"  # Fast fallback (u2netp requires download)
+  threshold: "otsu"  # Auto threshold
+  keep_components: 1  # Keep largest component only
+  min_area_percent: 1.0  # Skip tiny objects
+  
+roi:
+  pad_px: 32  # Expand bbox to avoid cutting details
+  min_size: 64  # Minimum ROI size
+  
+sam2:
+  enabled: true
+  image_size: 512  # Reduced from 1024 for speed
+  cache_embeddings: true
+  skip_if_saliency_good: true  # Skip SAM2 if saliency is high quality
+  quality_threshold: 0.85
+  
+post:
+  ray_prune:
+    enabled: true
+    max_width_px: 3  # Kill thin spikes
+  guided:
+    enabled: false  # Disabled for speed
+    radius: 4
+    eps: 0.001
+  feather:
+    enabled: true
+    inner: 1.0
+    outer: 2.0
+    
+performance:
+  max_candidates: 5  # Return only 5 best masks (was 12)
+  skip_enhancement: true
+  use_gpu: true
+  cache_size: 10

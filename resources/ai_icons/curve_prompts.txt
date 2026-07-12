@@ -1,0 +1,21 @@
+AI Icon Generation Prompts for 'curve' Tool
+==================================================
+
+Tool Description:
+Smooth curved line with control points
+
+DALL-E 3 Prompt:
+Create a minimal white outlined curved line with small control point circles, 48x48px, vector style, minimal white outline, transparent background, professional icon design. The icon should be suitable for a professional drawing application toolbar.
+
+Midjourney Prompt:
+minimal white outlined curved line with small control point circles, 48x48px, vector style, minimal white outline, transparent background, professional icon design --ar 1:1 --style raw --v 6
+
+Stable Diffusion Prompt:
+minimal white outlined curved line with small control point circles, 48x48px, vector style, minimal white outline, transparent background, professional icon design, vector art, line art, monochrome, high contrast, clean design
+
+Manual SVG Creation Tips:
+- Use simple white strokes (stroke='white' stroke-width='2-3')
+- Keep shapes minimal and recognizable
+- Use 48x48 viewBox for consistency
+- Ensure transparent background
+- Test at different sizes

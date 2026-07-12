@@ -1,9 +1,10 @@
 # Build directories
 build/
 build-*/
-*build*
+DrawingStudio_autogen/
+compile_commands.json
 
-# Qt generated files
+# Qt / CMake artifacts
 *.pro.user
 *.pro.user.*
 *.qbs.user
@@ -15,8 +16,6 @@ qrc_*.cpp
 ui_*.h
 *.o
 *.obj
-
-# CMake generated files
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
@@ -24,12 +23,14 @@ Makefile
 *.cmake
 !CMakeLists.txt
 
-# Executables
+# Executables / binaries
 *.exe
 *.app
+/DrawingStudio
 GuitarBuilder
 *.out
 *.com
+bin/
 
 # Libraries
 *.a
@@ -38,23 +39,19 @@ GuitarBuilder
 *.dylib
 *.dll
 
-# Debug files
+# Debug
 *.dSYM/
 *.pdb
 *.ilk
 
-# Qt Creator
+# IDE / OS
 *.autosave
 *.user
-
-# IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# OS generated files
 .DS_Store
 .DS_Store?
 ._*
@@ -62,6 +59,30 @@ GuitarBuilder
 .Trashes
 ehthumbs.db
 Thumbs.db
+.claude/settings.local.json
+.backup/
+.cache/
 
-# Log files
+# Logs
 *.log
+*.log.*
+
+# Large / local ML assets (not for checkpoint)
+models/
+**/venv/
+**/__pycache__/
+sam2_service/venv/
+sam2_service/cache/
+sam2_service/checkpoints/
+sam2_service/models/
+sam2_service/segment-anything-2/
+sam2_service/*.pt
+coreml_service/venv/
+coreml_service/**/*.mlmodel
+coreml_service/**/*.mlpackage/
+
+# Local test exports
+*.dxf
+testpng.png
+test_floor_plan.png
+drawingstudioicons.png

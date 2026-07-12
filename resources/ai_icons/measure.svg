@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="48" height="48" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+  <line x1="8" y1="24" x2="40" y2="24" stroke="white" stroke-width="2"/>
+  <line x1="8" y1="20" x2="8" y2="28" stroke="white" stroke-width="2"/>
+  <line x1="40" y1="20" x2="40" y2="28" stroke="white" stroke-width="2"/>
+  <text x="24" y="18" text-anchor="middle" fill="white" font-size="8">100</text>
+</svg>
