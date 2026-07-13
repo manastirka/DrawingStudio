@@ -36,7 +36,7 @@ If bots / image-to-drawing used:
 | Check | Result | When |
 |-------|--------|------|
 | `cmake --build` + `ctest` (22 tests) | PASS | 2026-07-14 |
-| Command server `/api/status` + `draw_line` | _see commit notes_ | 2026-07-14 |
+| Command server `/api/status` + `draw_line` | PASS (objectCount 0→1) | 2026-07-14 |
 | Manual UI (draw/undo/text/save/export) | _operator_ | — |
 | Mask flow | _operator_ | — |
 
