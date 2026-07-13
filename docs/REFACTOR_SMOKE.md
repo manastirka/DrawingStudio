@@ -29,3 +29,15 @@ If bots / image-to-drawing used:
 
 1. Import image → detect masks  
 2. Floating panel open / next / prev mask  
+
+
+## Last automated run
+
+| Check | Result | When |
+|-------|--------|------|
+| `cmake --build` + `ctest` (22 tests) | PASS | 2026-07-14 |
+| Command server `/api/status` + `draw_line` | _see commit notes_ | 2026-07-14 |
+| Manual UI (draw/undo/text/save/export) | _operator_ | — |
+| Mask flow | _operator_ | — |
+
+Dead code: `ImageAdjustments*.cpp` archived under `docs/archive/` (not built).
