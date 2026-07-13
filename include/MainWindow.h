@@ -37,8 +37,6 @@
 #include <atomic>
 #include <vector>
 
-#include "CompositeHelper.h"
-#include "AICompositeDialog.h"
 
 class DrawingCanvas;
 class PropertyPanel;
@@ -58,7 +56,17 @@ class CoreMLDiffusionHelper;
 class RemoteSDHelper;
 class CommandServer;
 class SAM2ServiceManager;
-class AIImageClient;
+class ImageToDrawingEngine;
+class DrawingCommandDispatcher;
+class FloatingMaskPanel;
+class ImageAdjustmentController;
+class AIWorkflowController;
+class ImageExportService;
+class ProjectFileService;
+class PrimitivePropertyApplier;
+class TextEditingController;
+class ToolOptionsBar;
+class ToolIconProvider;
 
 // Forward declare enum from DrawingCanvas.h
 enum class DrawingTool;
@@ -109,6 +117,7 @@ private slots:
     static QString imageExportFilterString();
     static QString formatFromFilter(const QString &selectedFilter);
     void extractLinesFromImage();
+    void importFloorPlan();
     void exitApplication();
     
     void undo();
@@ -159,7 +168,6 @@ private slots:
     void activateDrawingTool(DrawingTool tool);
     
     // Image generation
-    void onImageGenerated(const QImage& image, const QString& prompt);
     
     // Tool change handler
     void onToolChanged();
@@ -177,6 +185,10 @@ private slots:
     
     // Format menu methods
     void showAdvancedTextEditor();
+    void insertMathFormula();
+    void insertMathGraph();
+    void showMathTutorial();
+    void insertPhysicsSolver();
     void commitTextPropertyEdits(const QString &description,
                                  const std::function<void(TextPrimitive *)> &mutate);
     
@@ -263,27 +275,7 @@ private:
     void applyPreset(const QString& presetName);
     void saveCurrentPreset();
     
-    // Icon creation methods
-    QIcon createSelectIcon();
-    QIcon createLineIcon();
-    QIcon createCurveIcon();
-    QIcon createBezierIcon();
-    QIcon createSplineIcon();
-    QIcon createPolygonIcon();
-    QIcon createRectangleIcon();
-    QIcon createEllipseIcon();
-    QIcon createCircleIcon();
-    QIcon createArcIcon();
-    QIcon createEraserIcon();
-    QIcon createFillIcon();
-    QIcon createBrushIcon();
-    QIcon createBlurIcon();
-    QIcon createMeasureIcon();
-    QIcon createImageIcon();
-    QIcon createHandIcon();
-    QIcon createTextIcon();
-    QIcon createAngleLineIcon();
-    QIcon createMonoIcon(const std::function<void(QPainter&, const QRectF&)> &draw);
+    // Icons via ToolIconProvider (thin wrappers in .cpp)
     QIcon iconForTool(DrawingTool tool);
     QString displayNameForTool(DrawingTool tool) const;
     QKeySequence defaultShortcutForTool(DrawingTool tool) const;
@@ -292,12 +284,8 @@ private:
     void persistToolSlotChoice(DrawingTool tool);
     
     // Helper methods to load icons
-    QIcon loadCustomIcon(const QString& iconName, std::function<QIcon()> fallbackGenerator);
-    QIcon loadIconFromFile(const QString& filename);
     
     // SVG icon loading system
-    QIcon loadSVGIcon(const QString& iconName, const QSize& size = QSize(48, 48));
-    QIcon loadAIIcon(const QString& toolName, const QSize& size = QSize(48, 48));
     
 
     // UI Components
@@ -332,7 +320,6 @@ private:
     CommandServer *m_commandServer = nullptr;
     DiffusionHelper *m_diffusionHelper = nullptr;
     CoreMLDiffusionHelper *m_coreMLDiffusionHelper = nullptr;
-    RemoteSDHelper *m_remoteSDHelper = nullptr;
     
     // SD Backend selection
     enum class SDBackend {
@@ -350,8 +337,17 @@ private:
     // Internal clipboard for cut/copy/paste of primitives
     std::vector<QJsonObject> m_clipboard;
 
-    // Adaptive mosaic leaf cell data (shared between render_mosaic and render_photo_copy)
-    QJsonArray m_adaptiveLeafCells;
+    // Image-to-drawing engine (render_mosaic / auto_trace / render_photo_copy)
+    ImageToDrawingEngine *imageToDrawingEngine();
+    ImageToDrawingEngine *m_imageToDrawingEngine = nullptr;
+
+    // Bot / HTTP command dispatcher
+    DrawingCommandDispatcher *commandDispatcher();
+    void ensureCommandDispatcherHost();
+    DrawingCommandDispatcher *m_commandDispatcher = nullptr;
+    ImageAdjustmentController *m_imageAdjustmentController = nullptr;
+    ImageAdjustmentController *imageAdjustmentController();
+    void ensureImageAdjustmentHost();
 
     // Helper for image analysis API
     ImagePrimitive* findImageByIndex(int index);
@@ -380,102 +376,30 @@ private:
     SAM2ServiceManager *m_sam2Service = nullptr;
     
     // Tool settings widgets
-    QWidget *m_toolSettingsWidget = nullptr;
-    QHBoxLayout *m_toolSettingsLayout = nullptr;
     QToolBar *m_mainToolbar = nullptr;
     QToolBar *m_leftToolbar = nullptr;
     QToolBar *m_favoritesToolbar = nullptr;
 
     // Smart tool suggestions (options-bar chips + status coaching)
-    QWidget *m_suggestionStrip = nullptr;
-    QHBoxLayout *m_suggestionStripLayout = nullptr;
     QString m_liveSmartHint;
     QTimer *m_suggestionRestoreTimer = nullptr;
     
-    // Common tool settings
-    QLabel *m_setting1Label = nullptr;
-    QSlider *m_setting1Slider = nullptr;
-    QLabel *m_setting1ValueLabel = nullptr;
-    
-    QLabel *m_setting2Label = nullptr;
-    QSlider *m_setting2Slider = nullptr;
-    QLabel *m_setting2ValueLabel = nullptr;
-    
-    QLabel *m_setting3Label = nullptr;
-    QSlider *m_setting3Slider = nullptr;
-    QLabel *m_setting3ValueLabel = nullptr;
-    
-    QCheckBox *m_boolSetting1 = nullptr;
-    QCheckBox *m_boolSetting2 = nullptr;
 
-    // Hairline vertical group separators (Photoshop-style options bar)
-    QFrame *m_optSep1 = nullptr;  // between numeric/style group and toggles
-    QFrame *m_optSep2 = nullptr;  // before the preset group
 
-    // Text tool widgets
-    QFontComboBox *m_textFontCombo = nullptr;
-    QToolButton *m_textUnderlineBtn = nullptr;
-    QToolButton *m_textColorBtn = nullptr;
 
-    // Selection tool widgets
-    QLabel *m_selectionModeLabel = nullptr;
-    QComboBox *m_selectionModeCombo = nullptr;
-    QPushButton *m_selectSimilarButton = nullptr;
 
-    // Presets widgets
-    QLabel *m_presetLabel = nullptr;
-    QComboBox *m_presetCombo = nullptr;
-    QToolButton *m_savePresetButton = nullptr;
     
-    // SAM2 specific widgets
-    QPushButton *m_detectMasksButton = nullptr;
-    QPushButton *m_maskSettingsButton = nullptr;
-    QPushButton *m_extractButton = nullptr;
-    QPushButton *m_extractAllButton = nullptr;
-    QPushButton *m_editMaskButton = nullptr;
-    QCheckBox *m_maskInvertCheck = nullptr;
-    QCheckBox *m_maskOverlayCheck = nullptr;
-    QLabel *m_maskFeatherLabel = nullptr;
-    QSlider *m_maskFeatherSlider = nullptr;
-    QLabel *m_maskFeatherValue = nullptr;
-    QLabel *m_maskBlurLabel = nullptr;
-    QSlider *m_maskBlurSlider = nullptr;
-    QLabel *m_maskBlurValue = nullptr;
-    QLabel *m_maskExpandLabel = nullptr;
-    QSlider *m_maskExpandSlider = nullptr;
-    QLabel *m_maskExpandValue = nullptr;
     
     
     // Floating mask panel
-    QWidget *m_floatingMaskPanel = nullptr;
-    QPoint m_dragStartPosition;
-    bool m_isDragging = false;
+    FloatingMaskPanel *m_floatingMaskPanel = nullptr;
     void createFloatingMaskPanel();
+    void ensureFloatingMaskHost();
     void showFloatingMaskPanel();
     void hideFloatingMaskPanel();
     void updateFloatingMaskPanel();
-    bool eventFilter(QObject *obj, QEvent *event) override;
     
-    // Line style selector
-    QLabel *m_lineStyleLabel = nullptr;
-    QComboBox *m_lineStyleCombo = nullptr;
     
-    // Select by color widgets
-    QLabel *m_selectColorLabel = nullptr;
-    QPushButton *m_selectColorButton = nullptr;
-    QPushButton *m_pipetteButton = nullptr;
-    QColor m_selectByColor = Qt::black;
-    
-    // Floating mask panel child widgets
-    QLabel *m_fmpCounterLabel = nullptr;
-    QLabel *m_fmpScoreLabel = nullptr;
-    QLabel *m_fmpStabilityLabel = nullptr;
-    QLabel *m_fmpAreaLabel = nullptr;
-    QLabel *m_fmpIoULabel = nullptr;
-    QWidget *m_fmpScoreBar = nullptr;
-    QPushButton *m_fmpPrevBtn = nullptr;
-    QPushButton *m_fmpNextBtn = nullptr;
-    QSlider *m_fmpSlider = nullptr;
     
     // Tool action group for mutual exclusion (visible flyout slots)
     QActionGroup *m_toolActionGroup = nullptr;
@@ -513,46 +437,21 @@ private:
     
     // Auto enhance
     void autoEnhanceImage();
-    // Lazily construct/initialize AI helpers; return true only if usable.
-    bool ensureRemoteSDHelper();
-    void replaceSelectedObjectWithImage(const QImage &image, const QString &prompt, int mode = 0);
-    void importAIImageToCanvas(const QImage &image, const QString &prompt,
-                               bool replaceSelectedImage,
-                               bool showSuccessDialog = true);
-    void connectAIImageClient();
-    void onAIImageFinished(const QImage &image, const QString &prompt);
-    void resetAIJobState();
 
-    /** Resolve one or more subject cutouts (multi-select) + optional scene. */
-    bool resolveCompositeSubjects(QVector<CompositeHelper::SubjectSpec> *subjectsOut,
-                                  QString *errorOut);
-    bool resolveCompositeInputs(bool preferMaskedSubject, bool placeCutoutOnCanvas,
-                                QImage *subjectOut, QImage *sceneOut,
-                                QString *errorOut);
-    void startCompositeBlend(const QVector<CompositeHelper::SubjectSpec> &subjects,
-                             const QImage &background,
-                             const AICompositeDialog::Result &dlgResult);
-    /** Send cutouts to AI to generate a new integrated scene (lighting etc.). */
-    void startAiIntegrateCutouts(const QVector<CompositeHelper::SubjectSpec> &subjects,
-                                 const QImage &optionalScene,
-                                 const AICompositeDialog::Result &dlgResult);
-    void finishCompositePipeline(const QImage &blended, const QString &prompt);
 
     // Icon theme toggle: when true, always use generic (programmatic) icons
-    bool m_useGenericIcons = true;
-    AIImageClient *m_aiImageClient = nullptr;
-
-    /** Active AI job — finished handler dispatches on this (no reconnect races). */
-    enum class AIJobKind {
-        None,
-        Generate,
-        Edit,
-        CompositeBackground,
-        CompositeBlend,
-        CompositeAiIntegrate
-    };
-    AIJobKind m_aiJobKind = AIJobKind::None;
-    bool m_aiReplaceSelected = false;
-    QVector<CompositeHelper::SubjectSpec> m_compositeSubjects;
-    AICompositeDialog::Result m_compositeDlgResult;
+    AIWorkflowController *m_aiWorkflow = nullptr;
+    AIWorkflowController *aiWorkflow();
+    void ensureAIWorkflowHost();
+    ImageExportService *m_imageExportService = nullptr;
+    ImageExportService *imageExportService();
+    void ensureImageExportHost();
+    ProjectFileService *m_projectFileService = nullptr;
+    ProjectFileService *projectFileService();
+    void ensureProjectFileHost();
+    TextEditingController *m_textEditingController = nullptr;
+    TextEditingController *textEditingController();
+    void ensureTextEditingHost();
+    ToolOptionsBar *m_toolOptionsBar = nullptr;
+    void ensureToolOptionsHost();
 };

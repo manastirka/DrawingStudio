@@ -8,16 +8,29 @@
 #include <QRectF>
 #include <QSizeF>
 #include <QPolygonF>
-#include <QPen>
 #include <QImage>
 #include <QString>
 #include <QJsonObject>
 #include <memory>
 #include <vector>
 
+// Managers / models used as members (complete types required)
 #include "SelectionManager.h"
 #include "GridManager.h"
 #include "CanvasRenderer.h"
+#include "UnitsConverter.h"
+#include "MagneticSnap.h"
+#include "PaperModel.h"
+#include "AirbrushEngine.h"
+#include "AlignmentGuides.h"
+#include "DrawingTool.h"
+// Interaction hosts (return types for make*Host — E14: single cluster of includes)
+#include "tools/IDrawingTool.h"
+#include "MoveController.h"
+#include "SelectController.h"
+#include "SelectionGestureController.h"
+#include "ControlPointEditController.h"
+#include "ViewPanController.h"
 
 class DrawingPrimitive;
 class LinePrimitive;
@@ -27,6 +40,7 @@ class ImagePrimitive;
 class DrawingProject;
 class LayerManager;
 class AdvancedTextEditor;
+class ClassicTextTool;
 class Command;
 
 class QPainter;
@@ -42,35 +56,13 @@ class QTimer;
 class QUuid;
 class QFont;
 
-enum class DrawingTool {
-    Select,
-    Move,
-    Line,
-    Curve,
-    BezierCurve,
-    Spline,
-    Polygon,
-    Arc,
-    Circle,
-    Rectangle,
-    Ellipse,
-    AngleLine,
-    Eraser,
-    Fill,
-    Brush,
-    Blur,
-    Measure,
-    Image,
-    Text
-};
-
 class DrawingCanvas : public QWidget
 {
     Q_OBJECT
 
 public:
-    // Measurement system
-    enum class Units { Millimeters, Centimeters, Inches };
+    // Measurement system (alias — implementation in UnitsConverter)
+    using Units = UnitsConverter::Units;
 
     // Selection interaction mode
     enum class SelectionMode { Rectangle, Lasso };
@@ -78,7 +70,7 @@ public:
     // Fill tool mode
     enum class FillMode { Normal, Splash };
 
-    // Alignment system
+    // Alignment (values match ObjectLayoutOps::Align integer order)
     enum class AlignmentType {
         None,
         Left, Right, CenterHorizontal,
@@ -87,25 +79,15 @@ public:
         PageTop, PageBottom, PageCenterVertical
     };
 
-    // Paper formats (dimensions in mm)
-    enum class PaperFormat {
-        Custom,
-        A4,      // 210 x 297 mm
-        A3,      // 297 x 420 mm
-        A2,      // 420 x 594 mm
-        A1,      // 594 x 841 mm
-        A0,      // 841 x 1189 mm
-        Letter,  // 216 x 279 mm (8.5 x 11 inches)
-        Legal,   // 216 x 356 mm (8.5 x 14 inches)
-        Tabloid  // 279 x 432 mm (11 x 17 inches)
-    };
+    // Paper formats (alias — implementation in PaperModel)
+    using PaperFormat = PaperModel::Format;
 
     // Constants
     static constexpr float DEFAULT_GRID_SIZE = 7.5591f;   // 2mm grid
     static constexpr float FINE_GRID_SIZE = 3.77953f;     // 1mm grid
     static constexpr float COARSE_GRID_SIZE = 37.7953f;   // 10mm grid
-    static constexpr float DEFAULT_PIXELS_PER_MM = 3.77953f; // 96 DPI
-    static constexpr float DEFAULT_MAGNETIC_TOLERANCE = 10.0f;
+    static constexpr float DEFAULT_PIXELS_PER_MM = UnitsConverter::DEFAULT_PIXELS_PER_MM;
+    static constexpr float DEFAULT_MAGNETIC_TOLERANCE = MagneticSnap::DEFAULT_TOLERANCE;
 
     explicit DrawingCanvas(QWidget *parent = nullptr);
     ~DrawingCanvas();
@@ -137,7 +119,7 @@ public:
 
     // Paper color
     void setPaperColor(const QColor &color);
-    QColor paperColor() const { return m_paperColor; }
+    QColor paperColor() const { return m_paper.color(); }
 
     // Default drawing style
     void setDefaultDrawingColor(const QColor &color);
@@ -166,19 +148,19 @@ public:
     float zoomSensitivity() const { return m_zoomSensitivity; }
     QVector2D viewCenter() const { return m_viewCenter; }
 
-    // Paper format
+    // Paper format (façade over PaperModel)
     void setPaperFormat(PaperFormat format);
-    PaperFormat paperFormat() const { return m_paperFormat; }
-    QSizeF paperSize() const { return m_paperSize; } // Size in mm
+    PaperFormat paperFormat() const { return m_paper.format(); }
+    QSizeF paperSize() const { return m_paper.sizeMm(); } // Size in mm
     QString paperFormatName() const;
 
     // Rulers
     void setRulersVisible(bool visible);
     bool areRulersVisible() const { return m_rulersVisible; }
 
-    // Magnetic connection
+    // Magnetic connection (façade over MagneticSnap)
     void setMagneticConnectionEnabled(bool enabled);
-    bool isMagneticConnectionEnabled() const { return m_magneticConnectionEnabled; }
+    bool isMagneticConnectionEnabled() const { return m_magneticSnap.isEnabled(); }
     void setMagneticConnectionTolerance(float tolerance);
 
     // Tools
@@ -259,18 +241,23 @@ public:
     void setSplineVisibilityForText(TextPrimitive *textPrim, bool visible);
     bool getSplineVisibilityForText(TextPrimitive *textPrim) const;
 
-    // Measurement system
+    // Measurement system (façade over UnitsConverter)
     void setUnits(Units units);
-    Units getUnits() const { return m_units; }
+    Units getUnits() const { return m_unitsConverter.units(); }
     QString getUnitsString() const;
     float worldToUnits(float worldDistance) const;
     float unitsToWorld(float unitDistance) const;
     double pixelsPerUnit() const;
+    float pixelsPerMM() const { return m_unitsConverter.pixelsPerMM(); }
     void updateStatusBar();
 
     // Export helpers
     QImage renderToImage(int w = 0, int h = 0);
     static QImage getImageFromPrimitive(ImagePrimitive *img);
+
+    /** Inject ClassicTextTool so canvas does not depend on MainWindow. */
+    void setClassicTextTool(ClassicTextTool *tool) { m_classicTextTool = tool; }
+    ClassicTextTool *classicTextTool() const { return m_classicTextTool; }
 
 signals:
     void coordinatesChanged(const QVector2D &worldCoords);
@@ -284,6 +271,10 @@ signals:
     void maskInvertRequested();
     /// Live coaching hint while drawing (empty string clears to default suggestions).
     void smartHintChanged(const QString &hint);
+    /** Host should open the advanced text editor dialog. */
+    void advancedTextEditorRequested();
+    /** Host should activate a tool (toolbar / options bar sync). */
+    void toolChangeRequested(DrawingTool tool);
 
 protected:
     // Events
@@ -303,11 +294,11 @@ private slots:
     void onAdvancedTextEditorRequested();
 
 private:
-    // Setup
+    // --- Private API (impl in Paint / Hosts / Facades / Document TUs) ---
     void setupWorldTransform(QPainter &painter);
     void setupContextMenu();
 
-    // Rendering
+    // Paint (DrawingCanvasPaint.cpp)
     void renderGrid(QPainter &painter);
     void renderRulers(QPainter &painter);
     void renderRulerTexts(QPainter &painter);
@@ -328,8 +319,18 @@ private:
     void renderFormattedText(QPainter *painter, const TextPrimitive *textPrim,
                              const QPoint &pos, const QFont &font, bool showBox);
 
-    // Selection transform handles (bbox resize + optional rotate)
+    // Hosts (DrawingCanvasHosts.cpp)
     static constexpr int kHandleRotate = 8;
+    ToolHost makeToolHost();
+    void bindToolHostCallbacks(ToolHost &host);
+    void bindToolHostSession(ToolHost &host);
+    MoveHost makeMoveHost();
+    SelectHost makeSelectHost();
+    SelectionGestureHost makeSelectionGestureHost();
+    ControlPointEditHost makeControlPointEditHost();
+    ViewPanHost makeViewPanHost();
+
+    // Facades (DrawingCanvasFacades.cpp)
     void selectionHandlePositions(const QRectF &br, QPointF out[9]) const;
     float selectionHandleHalfSize() const;
     float selectionHandleHitRadius() const;
@@ -348,19 +349,8 @@ private:
     bool usesExternalRotation(const DrawingPrimitive *obj) const;
     QVector2D toObjectLocal(const DrawingPrimitive *obj,
                             const QVector2D &worldPos) const;
-
-    // Tool handlers
     void handleSelectTool(QMouseEvent *event);
     void handleMoveTool(QMouseEvent *event);
-    void handleLineTool(QMouseEvent *event);
-    void handleCurveTool(QMouseEvent *event);
-    void handleBezierTool(QMouseEvent *event);
-    void handleSplineTool(QMouseEvent *event);
-    void handlePolygonTool(QMouseEvent *event);
-    void handleRectangleTool(QMouseEvent *event);
-    void handleEllipseTool(QMouseEvent *event);
-    void handleCircleTool(QMouseEvent *event);
-    void handleAngleLineTool(QMouseEvent *event);
     QVector2D snapAngleLineEndpoint(const QVector2D &origin,
                                     const QVector2D &rawEnd,
                                     Qt::KeyboardModifiers mods) const;
@@ -371,64 +361,32 @@ private:
     QVector2D projectPointOntoLineSegment(const QVector2D &point,
                                           const QVector2D &a,
                                           const QVector2D &b) const;
-    void handleArcTool(QMouseEvent *event);
-    void handleEraserTool(QMouseEvent *event);
-    void handleFillTool(QMouseEvent *event);
-    void handleMeasureTool(QMouseEvent *event);
-    void handleImageTool(QMouseEvent *event);
-    void handleTextTool(QMouseEvent *event);
-
-    // Selection helpers
     void selectObjectsInRect(const QRectF &rect,
                              SelectionManager::SelectionOperation operation);
     void selectObjectsInLasso(const QPolygonF &polygon,
                               SelectionManager::SelectionOperation operation);
     QColor getColorAtPosition(const QVector2D &pos);
-
-    // Control point interaction
     int findControlPointAt(const QVector2D &pos, float tolerance = 8.0f);
     void startControlPointEdit(DrawingPrimitive *primitive, int controlPointIndex);
     void updateControlPoint(const QVector2D &newPos);
     void finishControlPointEdit();
-    int findClosestControlPoint(const QVector2D &pos);
-
-    // Move operations
     void handleMoveOperation(const QVector2D &worldPos);
     void finishMoveOperation();
     bool beginCopyAlongConnectedLineMove();
     static bool isCopyAlongModifier(Qt::KeyboardModifiers mods);
     DrawingPrimitive *findPrimitiveAt(const QVector2D &pos, float tolerance = 5.0f);
-
-    // Magnetic connection helpers
     QVector2D findNearestLineEndpoint(const QVector2D &pos, float tolerance);
     QVector2D snapToLineEndpoint(const QVector2D &pos);
-    /// Shift locks axis/square/circle; near-equal aspect softly snaps with a coaching hint.
     QVector2D applySmartDrawingConstraints(const QVector2D &rawPos,
                                            Qt::KeyboardModifiers mods,
                                            QString *hintOut);
-
-    // Geometry helpers
     bool computeCircleThroughPoints(const QVector2D &p1, const QVector2D &p2,
                                     const QVector2D &p3, QVector2D &centerOut,
                                     float &radiusOut);
     bool pointInPolygon(const QVector2D &point,
                         const std::vector<QVector2D> &polygon) const;
-
-    // Alignment helpers
-    struct AlignmentGuide {
-        QVector2D position;
-        AlignmentType type;
-        bool isActive;
-    };
     void updateAlignmentGuides(const QVector2D &mousePos);
     bool isObjectAtAlignmentPosition(DrawingPrimitive *obj, float tolerance);
-
-    // Airbrush drip state
-    struct AirbrushDrip {
-        QVector2D pos;
-        QVector2D vel;
-        float life;
-    };
 
     // ----- Member state -----
 
@@ -450,7 +408,6 @@ private:
 
     // Colors
     QColor m_backgroundColor;
-    QColor m_paperColor;
     QColor m_defaultDrawingColor;
     bool m_defaultFillEnabled;
     QColor m_defaultFillColor;
@@ -458,16 +415,14 @@ private:
     // Zoom
     float m_zoomSensitivity;
 
-    // Paper format
-    PaperFormat m_paperFormat;
-    QSizeF m_paperSize; // Size in mm
+    // Paper
+    PaperModel m_paper;
 
     // Rulers
     bool m_rulersVisible;
 
     // Magnetic connection
-    bool m_magneticConnectionEnabled;
-    float m_magneticConnectionTolerance;
+    MagneticSnap m_magneticSnap;
 
     // Tools and interaction
     DrawingTool m_currentTool;
@@ -491,13 +446,10 @@ private:
     std::vector<float> m_brushParticleScale;
     std::vector<float> m_brushParticleAlpha;
 
-    // Airbrush
+    // Airbrush (cursor + pure engine state — D1)
     QTimer *m_airbrushTimer;
     QVector2D m_airbrushPos;
-    QVector2D m_airbrushLastPos;
-    QVector2D m_airbrushSprayLastPos;
-    float m_airbrushStationarySeconds;
-    std::vector<AirbrushDrip> m_airbrushDrips;
+    AirbrushEngine::State m_airbrushState;
 
     // Default line style
     Qt::PenStyle m_defaultLineStyle;
@@ -575,8 +527,11 @@ private:
     // Advanced text editor
     AdvancedTextEditor *m_advancedTextEditor = nullptr;
 
-    // Alignment guides
-    std::vector<AlignmentGuide> m_alignmentGuides;
+    // Text tool (owned by MainWindow; injected, not owned)
+    ClassicTextTool *m_classicTextTool = nullptr;
+
+    // Alignment guides (pure Axis guides from AlignmentGuides module)
+    std::vector<AlignmentGuides::Guide> m_alignmentGuides;
     bool m_showAlignmentGuides;
 
     // Context menu
@@ -587,8 +542,7 @@ private:
     LayerManager *m_layerManager;
 
     // Measurement system
-    Units m_units;
-    float m_pixelsPerMM;
+    UnitsConverter m_unitsConverter;
 
     // Drawing primitives (legacy / fallback storage)
     std::vector<std::unique_ptr<DrawingPrimitive>> m_primitives;

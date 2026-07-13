@@ -6,9 +6,12 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QByteArray>
+#include <QMap>
+#include <QWidget>
+
+#include <functional>
 
 class DrawingCanvas;
-class MainWindow;
 
 class CommandServer : public QObject
 {
@@ -23,7 +26,15 @@ public:
     bool isRunning() const;
 
     void setCanvas(DrawingCanvas *canvas) { m_canvas = canvas; }
-    void setMainWindow(MainWindow *mw) { m_mainWindow = mw; }
+
+    /** Window used for full-window screenshots (typically MainWindow). */
+    void setWindowWidget(QWidget *window) { m_windowWidget = window; }
+
+    /** Provider for last bot-command JSON result (typically dispatcher / MainWindow). */
+    void setCommandResultProvider(std::function<QJsonObject()> provider)
+    {
+        m_resultProvider = std::move(provider);
+    }
 
 signals:
     void commandReceived(const QString &action, const QJsonObject &params);
@@ -52,8 +63,11 @@ private:
     void sendImageResponse(QTcpSocket *socket, const QByteArray &imageData);
     void sendErrorResponse(QTcpSocket *socket, int statusCode, const QString &message);
 
+    QJsonObject lastCommandResult() const;
+
     QTcpServer *m_server = nullptr;
     DrawingCanvas *m_canvas = nullptr;
-    MainWindow *m_mainWindow = nullptr;
+    QWidget *m_windowWidget = nullptr;
+    std::function<QJsonObject()> m_resultProvider;
     QMap<QTcpSocket*, QByteArray> m_buffers;
 };

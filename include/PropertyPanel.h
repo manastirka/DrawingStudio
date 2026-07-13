@@ -16,11 +16,17 @@
 #include <QScrollArea>
 #include <QFormLayout>
 #include <QTextEdit>
+#include <QMap>
+#include <QMetaType>
+#include <QVariant>
+#include <QVector2D>
+#include <vector>
 #include <memory>
 
-#include "DrawingCanvas.h" // for DrawingTool
+#include "DrawingTool.h"
 
 class DrawingPrimitive;
+class DrawingCanvas;
 class SimpleTextPanel;
 class ClassicTextTool;
 
@@ -74,13 +80,16 @@ private slots:
     void onPropertyValueChanged();
     
 private:
+    // UI chrome / editors (PropertyPanelEditors.cpp)
     void setupUI();
-    void addPropertyEditor(const QString& propertyName, const QString& displayName, 
+    void addPropertyEditor(const QString& propertyName, const QString& displayName,
                           QMetaType::Type type, const QVariant& value);
     void addSeparator();
     void addGroup(const QString& title);
-    std::vector<QVector2D> subdivideBezierCurve(const std::vector<QVector2D>& points, float t);
-    
+    void clearLayout();
+    QWidget* createEditor(const QString& propertyName, QMetaType::Type type,
+                          const QVariant& value);
+
     QScrollArea* m_scrollArea;
     QWidget* m_contentWidget;
     QVBoxLayout* m_contentLayout;
@@ -98,7 +107,4 @@ private:
     
     // Property editors
     QMap<QString, QWidget*> m_propertyEditors;
-    
-    void clearLayout();
-    QWidget* createEditor(const QString& propertyName, QMetaType::Type type, const QVariant& value);
 };

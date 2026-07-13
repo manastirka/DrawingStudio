@@ -1,8 +1,15 @@
 # Build directories
 build/
 build-*/
+build2/
 DrawingStudio_autogen/
 compile_commands.json
+
+# Large vendored trees (use git submodules via .gitmodules)
+external/
+
+# Local Claude/agent settings
+.claude/settings.local.json
 
 # Qt / CMake artifacts
 *.pro.user

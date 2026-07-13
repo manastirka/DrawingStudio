@@ -1,5 +1,4 @@
 #include "CommandServer.h"
-#include "MainWindow.h"
 #include "DrawingCanvas.h"
 #include "DrawingPrimitive.h"
 #include "ImagePrimitive.h"
@@ -10,6 +9,7 @@
 #include <QJsonArray>
 #include <QBuffer>
 #include <QImage>
+#include <QPixmap>
 #include <QDebug>
 #include <QFileInfo>
 
@@ -23,6 +23,13 @@ CommandServer::CommandServer(QObject *parent)
 CommandServer::~CommandServer()
 {
     stop();
+}
+
+QJsonObject CommandServer::lastCommandResult() const
+{
+    if (m_resultProvider)
+        return m_resultProvider();
+    return QJsonObject();
 }
 
 bool CommandServer::start(quint16 port)
@@ -202,12 +209,9 @@ void CommandServer::handleCommandEndpoint(QTcpSocket *socket, const QByteArray &
     QJsonObject response;
     response["action"] = action;
 
-    QJsonObject result;
-    if (m_mainWindow) {
-        result = m_mainWindow->lastCommandResult();
-        if (!result.isEmpty()) {
-            response["result"] = result;
-        }
+    QJsonObject result = lastCommandResult();
+    if (!result.isEmpty()) {
+        response["result"] = result;
     }
 
     // Explicit failure from handler (unknown / unimplemented / validation)
@@ -265,11 +269,9 @@ void CommandServer::handleBatchEndpoint(QTcpSocket *socket, const QByteArray &bo
         r["action"] = action;
 
         // Include command result data if available
-        if (m_mainWindow) {
-            QJsonObject result = m_mainWindow->lastCommandResult();
-            if (!result.isEmpty()) {
-                r["result"] = result;
-            }
+        QJsonObject result = lastCommandResult();
+        if (!result.isEmpty()) {
+            r["result"] = result;
         }
 
         results.append(r);
@@ -306,12 +308,12 @@ void CommandServer::handleScreenshotEndpoint(QTcpSocket *socket)
 
 void CommandServer::handleWindowScreenshotEndpoint(QTcpSocket *socket)
 {
-    if (!m_mainWindow) {
-        sendErrorResponse(socket, 500, "MainWindow not available");
+    if (!m_windowWidget) {
+        sendErrorResponse(socket, 500, "Window widget not available");
         return;
     }
 
-    QPixmap pixmap = m_mainWindow->grab();
+    QPixmap pixmap = m_windowWidget->grab();
     if (pixmap.isNull()) {
         sendErrorResponse(socket, 500, "Failed to grab window");
         return;

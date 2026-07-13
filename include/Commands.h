@@ -562,6 +562,41 @@ private:
 };
 
 /**
+ * Create a layer and populate it with floor-plan line segments (undo removes the layer).
+ */
+class ExtractFloorPlanLinesCommand : public Command {
+public:
+    struct Segment {
+        QVector2D start;
+        QVector2D end;
+    };
+
+    ExtractFloorPlanLinesCommand(DrawingCanvas *canvas,
+                                 LayerManager *layerManager,
+                                 QString layerName,
+                                 std::vector<Segment> segments,
+                                 QColor color = Qt::black,
+                                 float lineWidth = 1.0f);
+
+    void execute() override;
+    void undo() override;
+    QString description() const override;
+
+private:
+    DrawingCanvas *m_canvas = nullptr;
+    LayerManager *m_layerManager = nullptr;
+    QString m_layerName;
+    std::vector<Segment> m_segments;
+    QColor m_color;
+    float m_lineWidth = 1.0f;
+    QUuid m_layerId;
+    size_t m_insertIndex = 0;
+    QUuid m_previousActiveLayerId;
+    std::unique_ptr<Layer> m_layer;
+    bool m_executed = false;
+};
+
+/**
  * Command for changing mask contour smoothness
  */
 class SetContourSmoothnessCommand : public Command {
