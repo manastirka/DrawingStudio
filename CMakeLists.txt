@@ -141,6 +141,8 @@ set(SOURCES
     src/ClassicTextToolEditor.cpp
     src/ClassicTextToolInput.cpp
     src/SimpleTextPanel.cpp
+    src/SimpleTextPanelSetup.cpp
+    src/SimpleTextPanelEffects.cpp
     src/ToolSuggestionService.cpp
     src/DiffusionHelper.cpp
     src/CoreMLDiffusionHelper.cpp
