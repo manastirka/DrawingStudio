@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'refactor/**']
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: Unit tests (macOS / Qt6)
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt 6 + CMake + Ninja
+        run: |
+          brew update
+          brew install qt@6 cmake ninja
+
+      - name: Configure (tests only — no SD app link)
+        run: |
+          QT_PREFIX="$(brew --prefix qt@6)"
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${QT_PREFIX}" \
+            -DBUILD_DRAWINGSTUDIO_APP=OFF \
+            -DBUILD_DRAWINGSTUDIO_TESTS=ON
+
+      - name: Build tests
+        run: cmake --build build -j "$(sysctl -n hw.ncpu)"
+
+      - name: Run ctest
+        working-directory: build
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ctest --output-on-failure --timeout 120
+
+      # Full GUI + command-server smoke needs the app binary + SD libs (not on CI).
+      # Local: ./scripts/smoke_api.sh

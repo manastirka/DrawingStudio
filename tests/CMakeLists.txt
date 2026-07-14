@@ -293,6 +293,21 @@ target_link_libraries(tst_PrimitiveRoundTrip PRIVATE
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Test)
 add_test(NAME tst_PrimitiveRoundTrip COMMAND tst_PrimitiveRoundTrip)
 
+# Fake / validation paths for AIImageClient (no network)
+add_executable(tst_AIImageClient
+    tst_AIImageClient.cpp
+    ../src/AIImageClient.cpp
+    ../src/AIImageClientNanoBanana.cpp
+    ../src/AIImageClientProviders.cpp
+    ../include/AIImageClient.h
+)
+target_include_directories(tst_AIImageClient PRIVATE ../include)
+target_link_libraries(tst_AIImageClient PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Network Qt6::Test)
+add_test(NAME tst_AIImageClient COMMAND tst_AIImageClient)
+set_tests_properties(tst_AIImageClient PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 # UnitsConverter
 add_executable(tst_UnitsConverter
     tst_UnitsConverter.cpp

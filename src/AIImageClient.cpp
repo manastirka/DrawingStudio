@@ -74,7 +74,8 @@ void AIImageClient::generate(const Request &request)
 void AIImageClient::edit(const Request &request)
 {
     if (request.sourceImage.isNull() && request.referenceImages.isEmpty()) {
-        failWith(QStringLiteral("No source/reference image for AI edit."));
+        // Idle validation — failWith ignores non-busy callers to drop late network aborts.
+        emit failed(QStringLiteral("No source/reference image for AI edit."));
         return;
     }
     runRequest(request, true);
@@ -85,11 +86,11 @@ void AIImageClient::edit(const Request &request)
 void AIImageClient::runRequest(Request request, bool isEdit)
 {
     if (m_busy) {
-        failWith(QStringLiteral("An AI job is already running."));
+        emit failed(QStringLiteral("An AI job is already running."));
         return;
     }
     if (request.prompt.trimmed().isEmpty()) {
-        failWith(QStringLiteral("Prompt is empty."));
+        emit failed(QStringLiteral("Prompt is empty."));
         return;
     }
 

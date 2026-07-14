@@ -5,9 +5,12 @@ project(DrawingStudio LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+option(BUILD_DRAWINGSTUDIO_APP "Build the DrawingStudio GUI app (needs prebuilt SD libs)" ON)
+option(BUILD_DRAWINGSTUDIO_TESTS "Build unit tests" ON)
+
 # Find required packages
 find_package(Qt6 REQUIRED COMPONENTS Widgets Gui Core Network Concurrent OpenGL OpenGLWidgets)
-find_package(Qt6 OPTIONAL_COMPONENTS Pdf)
+find_package(Qt6 OPTIONAL_COMPONENTS Pdf Test)
 
 # Enable Qt MOC
 set(CMAKE_AUTOMOC ON)
@@ -312,39 +315,43 @@ set(HEADERS
     include/PhysicsCatalog.h
     include/PhysicsSolverDialog.h
 )
-# Create executable
-add_executable(DrawingStudio ${SOURCES} ${HEADERS})
+if(BUILD_DRAWINGSTUDIO_APP)
+    # Create executable
+    add_executable(DrawingStudio ${SOURCES} ${HEADERS})
 
-# Include stable-diffusion.cpp headers
-target_include_directories(DrawingStudio PRIVATE 
-    ${SD_INCLUDE_DIR}
-    ${SD_GGML_INCLUDE_DIR}
-)
+    # Include stable-diffusion.cpp headers
+    target_include_directories(DrawingStudio PRIVATE
+        ${SD_INCLUDE_DIR}
+        ${SD_GGML_INCLUDE_DIR}
+    )
 
-# Link Qt libraries and stable-diffusion
-# Metal is DISABLED to prevent crashes - using CPU-only mode
-message(STATUS "Stable Diffusion: CPU-only mode (Metal disabled)")
-target_link_libraries(DrawingStudio PRIVATE
-    Qt6::Widgets
-    Qt6::Gui
-    Qt6::Core
-    Qt6::Network
-    Qt6::Concurrent
-    Qt6::OpenGL
-    Qt6::OpenGLWidgets
-    ${SD_LIB_DIR}/libstable-diffusion.a
-    ${SD_LIB_DIR}/ggml/src/libggml.a
-    ${SD_LIB_DIR}/ggml/src/libggml-cpu.a
-    ${SD_LIB_DIR}/ggml/src/ggml-blas/libggml-blas.a
-    ${SD_LIB_DIR}/ggml/src/libggml-base.a
-    "-framework Foundation"
-    "-framework Accelerate"
-)
+    # Link Qt libraries and stable-diffusion
+    # Metal is DISABLED to prevent crashes - using CPU-only mode
+    message(STATUS "Stable Diffusion: CPU-only mode (Metal disabled)")
+    target_link_libraries(DrawingStudio PRIVATE
+        Qt6::Widgets
+        Qt6::Gui
+        Qt6::Core
+        Qt6::Network
+        Qt6::Concurrent
+        Qt6::OpenGL
+        Qt6::OpenGLWidgets
+        ${SD_LIB_DIR}/libstable-diffusion.a
+        ${SD_LIB_DIR}/ggml/src/libggml.a
+        ${SD_LIB_DIR}/ggml/src/libggml-cpu.a
+        ${SD_LIB_DIR}/ggml/src/ggml-blas/libggml-blas.a
+        ${SD_LIB_DIR}/ggml/src/libggml-base.a
+        "-framework Foundation"
+        "-framework Accelerate"
+    )
 
-# Link PDF support if available
-if(TARGET Qt6::Pdf)
-    target_link_libraries(DrawingStudio PRIVATE Qt6::Pdf)
-    target_compile_definitions(DrawingStudio PRIVATE HAVE_QT_PDF)
+    # Link PDF support if available
+    if(TARGET Qt6::Pdf)
+        target_link_libraries(DrawingStudio PRIVATE Qt6::Pdf)
+        target_compile_definitions(DrawingStudio PRIVATE HAVE_QT_PDF)
+    endif()
+else()
+    message(STATUS "BUILD_DRAWINGSTUDIO_APP=OFF — skipping main app / SD link")
 endif()
 
 # Create include directory
@@ -355,5 +362,7 @@ file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/resources/icons)
 file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/tests)
 
 # Add tests
-enable_testing()
-add_subdirectory(tests)
+if(BUILD_DRAWINGSTUDIO_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

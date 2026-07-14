@@ -35,11 +35,11 @@ public:
     explicit AIImageClient(QObject *parent = nullptr);
     ~AIImageClient() override;
 
-    bool isBusy() const { return m_busy; }
-    void cancel();
+    virtual bool isBusy() const { return m_busy; }
+    virtual void cancel();
 
-    void generate(const Request &request);
-    void edit(const Request &request);
+    virtual void generate(const Request &request);
+    virtual void edit(const Request &request);
     void testConnection(const QString &provider);
 
 signals:
@@ -48,6 +48,12 @@ signals:
     void finished(const QImage &image, const QString &prompt);
     void failed(const QString &error);
     void connectionTestFinished(bool ok, const QString &message);
+
+protected:
+    /** Subclasses / tests may complete a job without network I/O. */
+    void finishWithImage(const QImage &image, const QString &prompt);
+    void failWith(const QString &error);
+    void setBusy(bool busy) { m_busy = busy; }
 
 private:
     void runRequest(Request request, bool isEdit);
@@ -58,8 +64,6 @@ private:
     void runHiggsfieldCli(const Request &req, const QString &model);
     void runRemoteSd(const Request &req);
     void downloadImageUrl(const QUrl &url, const QString &prompt);
-    void finishWithImage(const QImage &image, const QString &prompt);
-    void failWith(const QString &error);
 
     QString resolveProvider(const Request &req) const;
     QString resolveModel(const QString &provider, const Request &req) const;

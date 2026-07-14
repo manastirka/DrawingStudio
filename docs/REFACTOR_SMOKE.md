@@ -41,7 +41,7 @@ Optional API smoke (starts the app if needed):
 
 | Check | Result | When |
 |-------|--------|------|
-| `cmake --build` + `ctest` (27 tests) | PASS | 2026-07-14 |
+| `cmake --build` + `ctest` (28 tests) | PASS | 2026-07-14 |
 | Command server smoke script | PASS (draw + undo) | 2026-07-14 |
 | Primitive JSON round-trip | covered by `tst_PrimitiveRoundTrip` | 2026-07-14 |
 | Silent autosave session callbacks | covered by `tst_ProjectFileService` | 2026-07-14 |

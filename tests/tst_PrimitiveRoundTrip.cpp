@@ -18,6 +18,9 @@ private slots:
     void ellipse_roundTrip();
     void text_roundTrip();
     void polygon_roundTrip();
+    void curve_roundTrip();
+    void bezier_roundTrip();
+    void spline_roundTrip();
     void colorAndWidth_preserved();
 };
 
@@ -115,6 +118,66 @@ void tst_PrimitiveRoundTrip::polygon_roundTrip()
     QVERIFY(p);
     QCOMPARE(static_cast<int>(p->points().size()), 3);
     QCOMPARE(p->isClosed(), true);
+}
+
+void tst_PrimitiveRoundTrip::curve_roundTrip()
+{
+    CurvePrimitive src;
+    src.addControlPoint(QVector2D(0, 0));
+    src.addControlPoint(QVector2D(20, 40));
+    src.addControlPoint(QVector2D(40, 0));
+    src.setClosed(false);
+    src.setCurveType(2);
+
+    auto out = roundTrip(src);
+    QVERIFY(out);
+    QCOMPARE(out->type(), PrimitiveType::Curve);
+    auto *c = dynamic_cast<CurvePrimitive *>(out.get());
+    QVERIFY(c);
+    QCOMPARE(static_cast<int>(c->controlPoints().size()), 3);
+    QCOMPARE(c->controlPoints()[1], QVector2D(20, 40));
+    QCOMPARE(c->curveType(), 2);
+}
+
+void tst_PrimitiveRoundTrip::bezier_roundTrip()
+{
+    BezierCurvePrimitive src;
+    src.setControlPoints({
+        QVector2D(0, 0),
+        QVector2D(10, 30),
+        QVector2D(30, 30),
+        QVector2D(40, 0),
+    });
+    src.setSubdivisionLevel(40);
+
+    auto out = roundTrip(src);
+    QVERIFY(out);
+    QCOMPARE(out->type(), PrimitiveType::BezierCurve);
+    auto *b = dynamic_cast<BezierCurvePrimitive *>(out.get());
+    QVERIFY(b);
+    QCOMPARE(static_cast<int>(b->controlPoints().size()), 4);
+    QCOMPARE(b->controlPoints()[0], QVector2D(0, 0));
+    QCOMPARE(b->controlPoints()[3], QVector2D(40, 0));
+    QCOMPARE(b->subdivisionLevel(), 40);
+}
+
+void tst_PrimitiveRoundTrip::spline_roundTrip()
+{
+    SplinePrimitive src;
+    src.addPoint(QVector2D(1, 1));
+    src.addPoint(QVector2D(5, 9));
+    src.addPoint(QVector2D(12, 2));
+    src.setClosed(true);
+    src.setSmoothness(0.75f);
+
+    auto out = roundTrip(src);
+    QVERIFY(out);
+    QCOMPARE(out->type(), PrimitiveType::Spline);
+    auto *s = dynamic_cast<SplinePrimitive *>(out.get());
+    QVERIFY(s);
+    QCOMPARE(static_cast<int>(s->points().size()), 3);
+    QCOMPARE(s->isClosed(), true);
+    QCOMPARE(s->smoothness(), 0.75f);
 }
 
 void tst_PrimitiveRoundTrip::colorAndWidth_preserved()
