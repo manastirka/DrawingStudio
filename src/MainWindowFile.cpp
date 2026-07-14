@@ -7,11 +7,16 @@
 #include "ClassicTextTool.h"
 #include "LayerManager.h"
 #include "LayerPanel.h"
+#include <QDir>
+#include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QMessageBox>
 #include <QCloseEvent>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QDebug>
+#include <QTime>
 #include <QTimer>
 
 void MainWindow::closeEvent(QCloseEvent *event)
@@ -67,6 +72,80 @@ void MainWindow::setCurrentFile(const QString &fileName)
     if (m_commandManager)
         m_commandManager->markClean();
     updateWindowTitle();
+    // Successful user save/open replaces the need for a crash recovery file.
+    if (!fileName.isEmpty())
+        clearRecoveryFile();
+}
+
+QString MainWindow::recoveryFilePath() const
+{
+    const QString root =
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir dir(root);
+    dir.mkpath(QStringLiteral("autosave"));
+    return dir.filePath(QStringLiteral("recovery.drawing"));
+}
+
+void MainWindow::clearRecoveryFile()
+{
+    const QString path = recoveryFilePath();
+    if (QFile::exists(path))
+        QFile::remove(path);
+}
+
+void MainWindow::setupAutosave()
+{
+    if (m_autosaveTimer)
+        return;
+    m_autosaveTimer = new QTimer(this);
+    m_autosaveTimer->setInterval(2 * 60 * 1000); // 2 minutes
+    connect(m_autosaveTimer, &QTimer::timeout, this, &MainWindow::performAutosave);
+    m_autosaveTimer->start();
+}
+
+void MainWindow::performAutosave()
+{
+    if (!m_isModified || !m_layerManager)
+        return;
+    ensureProjectFileHost();
+    const QString path = recoveryFilePath();
+    if (projectFileService()->saveToFile(path, /*updateSession=*/false)) {
+        if (m_statusLabel) {
+            m_statusLabel->setText(
+                QStringLiteral("Autosaved recovery · %1")
+                    .arg(QTime::currentTime().toString(QStringLiteral("HH:mm"))));
+        }
+    }
+}
+
+void MainWindow::checkRecoveryFileOnStartup()
+{
+    const QString path = recoveryFilePath();
+    QFileInfo info(path);
+    if (!info.exists() || info.size() < 32)
+        return;
+
+    const auto ret = QMessageBox::question(
+        this, QStringLiteral("Recover Project"),
+        QStringLiteral(
+            "A recovery autosave was found from a previous session.\n\n"
+            "Restore it now?\n\n%1")
+            .arg(path),
+        QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
+    if (ret != QMessageBox::Yes) {
+        clearRecoveryFile();
+        return;
+    }
+    if (loadProjectFromFile(path, true)) {
+        // Keep as untitled dirty document so user chooses where to save.
+        m_currentFile.clear();
+        m_isModified = true;
+        if (m_commandManager)
+            m_commandManager->invalidateClean();
+        updateWindowTitle();
+        if (m_statusLabel)
+            m_statusLabel->setText(QStringLiteral("Restored recovery autosave — use Save As…"));
+    }
 }
 
 void MainWindow::syncModifiedFlag()

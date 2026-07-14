@@ -56,6 +56,9 @@ public:
 
     bool isBusy() const;
 
+    /** Abort in-flight generate/edit/composite network or CLI job. */
+    void cancelActiveJob();
+
     void showAISettings();
     void generateAIImage();
     void editSelectedWithAI();

@@ -4,6 +4,8 @@
 #include "DXFExporter.h"
 #include "LayerManager.h"
 
+#include <QCoreApplication>
+#include <QEventLoop>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QImage>
@@ -11,6 +13,7 @@
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QPainter>
+#include <QProgressDialog>
 #include <QWidget>
 QString ImageExportService::imageFormatFromPath(const QString &path) {
     const QString ext = QFileInfo(path).suffix().toLower();
@@ -133,8 +136,19 @@ bool ImageExportService::exportCanvasToFile(const QString &path, const QString &
                                     int quality) {
     if (!m_host.canvas || path.isEmpty()) return false;
 
+    QProgressDialog progress(QStringLiteral("Exporting image…"), QString(), 0, 0,
+                             m_host.dialogParent);
+    progress.setWindowModality(Qt::ApplicationModal);
+    progress.setMinimumDuration(400);
+    progress.setValue(0);
+    progress.setLabelText(QStringLiteral("Rendering canvas…"));
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
     QImage img = m_host.canvas->renderToImage();
     if (img.isNull()) return false;
+
+    progress.setLabelText(QStringLiteral("Writing file…"));
+    QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 
     QString fmt = format;
     if (fmt.isEmpty()) {

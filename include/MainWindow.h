@@ -358,6 +358,7 @@ private:
     // File management
     QString m_currentFile;
     bool m_isModified = false;
+    QTimer *m_autosaveTimer = nullptr;
 
     // Recent files
     enum { MaxRecentFiles = 10 };
@@ -418,7 +419,15 @@ private:
     /** Extract SAM2 subjects from all selected images; leave all cutouts selected. */
     void extractSelectedSubjects();
     void showAISettings();
+    void cancelAIJob();
     void showMaskSettingsPopup();
+
+    // Autosave / crash recovery
+    void setupAutosave();
+    void performAutosave();
+    void checkRecoveryFileOnStartup();
+    void clearRecoveryFile();
+    QString recoveryFilePath() const;
     
     // Image adjustments
     void showLevelsAdjustment();

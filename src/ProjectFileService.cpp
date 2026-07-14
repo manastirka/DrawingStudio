@@ -23,7 +23,7 @@ ProjectFileService::ProjectFileService(QObject *parent)
 {
 }
 
-bool ProjectFileService::saveToFile(const QString& fileName) {
+bool ProjectFileService::saveToFile(const QString& fileName, bool updateSession) {
     QFile file(fileName);
     if (!file.open(QIODevice::WriteOnly)) return false;
 
@@ -67,9 +67,16 @@ bool ProjectFileService::saveToFile(const QString& fileName) {
 
     QJsonDocument doc(json);
     file.write(doc.toJson());
-    if (m_host.setCurrentFile) m_host.setCurrentFile(fileName);
-    if (m_host.addToRecentFiles) m_host.addToRecentFiles(fileName);
-    if (m_host.setStatusText) m_host.setStatusText("Saved: " + fileName);
+    if (updateSession) {
+        if (m_host.setCurrentFile)
+            m_host.setCurrentFile(fileName);
+        if (m_host.addToRecentFiles)
+            m_host.addToRecentFiles(fileName);
+        if (m_host.setStatusText)
+            m_host.setStatusText(QStringLiteral("Saved: ") + fileName);
+    } else if (m_host.setStatusText) {
+        m_host.setStatusText(QStringLiteral("Autosaved recovery snapshot"));
+    }
     return true;
 }
 

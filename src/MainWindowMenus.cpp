@@ -50,6 +50,12 @@ void MainWindow::setupMenus()
     QAction *saveAsAction = fileMenu->addAction("Save &As...", this, &MainWindow::saveProjectAs);
     saveAsAction->setShortcut(QKeySequence::SaveAs);
     saveAsAction->setStatusTip("Save the project with a new name");
+
+    QAction *autosaveNote = fileMenu->addAction(
+        QStringLiteral("Autosave recovery every 2 min (when dirty)"));
+    autosaveNote->setEnabled(false);
+    autosaveNote->setStatusTip(
+        QStringLiteral("Background recovery snapshot is written automatically while the project is modified"));
     
     fileMenu->addSeparator();
 
@@ -513,6 +519,9 @@ void MainWindow::setupMenus()
     aiMenu->addAction("&Generate Image...", this, &MainWindow::generateAIImage);
     aiMenu->addAction("&Edit Selected Image...", this, &MainWindow::editSelectedWithAI);
     aiMenu->addAction("Place &Subject in Scene...", this, &MainWindow::placeSubjectInScene);
+    QAction *cancelAi = aiMenu->addAction("Cancel AI &Job", this, &MainWindow::cancelAIJob);
+    cancelAi->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+.")));
+    cancelAi->setStatusTip(QStringLiteral("Abort the current AI generate/edit/composite request"));
     
     // Help Menu
     QMenu *helpMenu = menuBar()->addMenu("&Help");

@@ -70,6 +70,20 @@ bool AIWorkflowController::isBusy() const
     return m_aiImageClient && m_aiImageClient->isBusy();
 }
 
+// --- cancelActiveJob ---
+void AIWorkflowController::cancelActiveJob()
+{
+    if (!isBusy()) {
+        setStatusText(QStringLiteral("No AI job to cancel"));
+        return;
+    }
+    if (m_aiImageClient)
+        m_aiImageClient->cancel();
+    resetAIJobState();
+    clearStatusMessage();
+    setStatusText(QStringLiteral("AI job cancelled"));
+}
+
 
 // --- AIWorkflowController ---
 AIWorkflowController::AIWorkflowController(QObject *parent)
@@ -175,9 +189,16 @@ void AIWorkflowController::connectAIImageClient()
         resetAIJobState();
         clearStatusMessage();
         const QString firstLine = err.section(QLatin1Char('\n'), 0, 0).trimmed();
+        const bool cancelled = err.contains(QStringLiteral("cancelled"), Qt::CaseInsensitive);
         setStatusText(
-                firstLine.isEmpty() ? QStringLiteral("AI failed")
-                                    : firstLine.left(120));
+                firstLine.isEmpty()
+                    ? (cancelled ? QStringLiteral("AI cancelled")
+                                 : QStringLiteral("AI failed"))
+                    : firstLine.left(120));
+        if (cancelled) {
+            showStatusMessage(QStringLiteral("AI job cancelled"), 3000);
+            return;
+        }
         QMessageBox::critical(dialogParent(), QStringLiteral("AI Image"), err);
     });
 }

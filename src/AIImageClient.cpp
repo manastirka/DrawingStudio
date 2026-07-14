@@ -38,11 +38,28 @@ AIImageClient::~AIImageClient()
 // --- cancel ---
 void AIImageClient::cancel()
 {
+    const bool wasBusy = m_busy
+        || (m_process && m_process->state() != QProcess::NotRunning);
+    if (!wasBusy)
+        return;
+
+    // Mark idle first so in-flight reply handlers no-op in finishWithImage/failWith.
+    m_busy = false;
+
+    if (m_nam) {
+        const auto replies = m_nam->findChildren<QNetworkReply *>();
+        for (QNetworkReply *reply : replies) {
+            if (reply && reply->isRunning())
+                reply->abort();
+        }
+    }
+
     if (m_process && m_process->state() != QProcess::NotRunning) {
         m_process->kill();
         m_process->waitForFinished(2000);
     }
-    m_busy = false;
+
+    emit failed(QStringLiteral("AI job cancelled."));
 }
 
 
@@ -199,11 +216,13 @@ QString AIImageClient::saveTempPng(const QImage &image, QString *errorOut)
 // --- finishWithImage ---
 void AIImageClient::finishWithImage(const QImage &image, const QString &prompt)
 {
-    m_busy = false;
+    if (!m_busy)
+        return; // cancelled or already completed
     if (image.isNull()) {
         failWith(QStringLiteral("Received an empty image."));
         return;
     }
+    m_busy = false;
     emit finished(image, prompt);
 }
 
@@ -211,6 +230,8 @@ void AIImageClient::finishWithImage(const QImage &image, const QString &prompt)
 // --- failWith ---
 void AIImageClient::failWith(const QString &error)
 {
+    if (!m_busy)
+        return; // cancelled or already completed
     m_busy = false;
     emit failed(error);
 }

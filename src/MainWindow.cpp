@@ -171,6 +171,10 @@ MainWindow::MainWindow(QWidget *parent)
                     m_sam2StatusLabel->setText(message);
             });
     m_sam2Service->start();
+
+    setupAutosave();
+    // After UI is up — offer restore without blocking construction.
+    QTimer::singleShot(0, this, &MainWindow::checkRecoveryFileOnStartup);
 }
 
 MainWindow::~MainWindow()

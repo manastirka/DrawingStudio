@@ -32,7 +32,8 @@ public:
     void setHost(Host host) { m_host = std::move(host); }
     const Host &host() const { return m_host; }
 
-    bool saveToFile(const QString &fileName);
+    /** @param updateSession when false, skip setCurrentFile / recent-files (autosave). */
+    bool saveToFile(const QString &fileName, bool updateSession = true);
     bool loadFromFile(const QString &fileName);
     bool loadFromFile(const QString &fileName, bool waitUntilLoaded);
 

@@ -211,6 +211,12 @@ void MainWindow::placeSubjectInScene()
     aiWorkflow()->placeSubjectInScene();
 }
 
+void MainWindow::cancelAIJob()
+{
+    ensureAIWorkflowHost();
+    aiWorkflow()->cancelActiveJob();
+}
+
 // --- recovered after A6 over-delete ---
 
 TextEditingController *MainWindow::textEditingController()
