@@ -428,6 +428,7 @@ private:
     void checkRecoveryFileOnStartup();
     void clearRecoveryFile();
     QString recoveryFilePath() const;
+    void resetWindowLayout();
     
     // Image adjustments
     void showLevelsAdjustment();

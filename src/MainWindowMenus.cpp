@@ -56,7 +56,16 @@ void MainWindow::setupMenus()
     autosaveNote->setEnabled(false);
     autosaveNote->setStatusTip(
         QStringLiteral("Background recovery snapshot is written automatically while the project is modified"));
-    
+
+    QAction *clearRecovery = fileMenu->addAction(
+        QStringLiteral("Clear Recovery Autosave…"), this, [this]() {
+            clearRecoveryFile();
+            if (m_statusLabel)
+                m_statusLabel->setText(QStringLiteral("Recovery autosave cleared"));
+        });
+    clearRecovery->setStatusTip(
+        QStringLiteral("Delete the crash-recovery snapshot without opening it"));
+
     fileMenu->addSeparator();
 
     QAction *importFloorPlanAction =
@@ -528,6 +537,9 @@ void MainWindow::setupMenus()
     
     QAction *helpAction = helpMenu->addAction("&Help", this, &MainWindow::showHelp);
     helpAction->setShortcut(QKeySequence::HelpContents);
+
+    helpMenu->addAction(QStringLiteral("Reset &Window Layout…"), this,
+                        &MainWindow::resetWindowLayout);
     
     helpMenu->addSeparator();
     

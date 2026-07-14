@@ -56,6 +56,13 @@ public:
 
     bool isBusy() const;
 
+    /**
+     * Replace the AI client (takes ownership via QObject parent).
+     * Used by tests with FakeAIImageClient; production uses the default client.
+     */
+    void setAIImageClient(AIImageClient *client);
+    AIImageClient *aiImageClient() const { return m_aiImageClient; }
+
     /** Abort in-flight generate/edit/composite network or CLI job. */
     void cancelActiveJob();
 
@@ -77,6 +84,7 @@ private:
     void resetAIJobState();
     void onAIImageFinished(const QImage &image, const QString &prompt);
     void connectAIImageClient();
+    void wireAIImageClientSignals();
 
     bool resolveCompositeSubjects(QVector<CompositeHelper::SubjectSpec> *subjectsOut,
                                   QString *errorOut);
@@ -98,6 +106,7 @@ private:
 
     Host m_host;
     AIImageClient *m_aiImageClient = nullptr;
+    bool m_aiClientSignalsWired = false;
     RemoteSDHelper *m_remoteSDHelper = nullptr;
     AIJobKind m_aiJobKind = AIJobKind::None;
     bool m_aiReplaceSelected = false;

@@ -563,3 +563,33 @@ add_test(NAME tst_DrawingCommandDispatcher COMMAND tst_DrawingCommandDispatcher)
 set_tests_properties(tst_DrawingCommandDispatcher PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+# AIWorkflowController with injected Fake client (after TEST_CANVAS_BUNDLE)
+add_executable(tst_AIWorkflowController
+    tst_AIWorkflowController.cpp
+    ../src/AIWorkflowController.cpp
+    ../src/AIWorkflowControllerComposite.cpp
+    ../src/AIWorkflowControllerPlace.cpp
+    ../src/AIImageClient.cpp
+    ../src/AIImageClientNanoBanana.cpp
+    ../src/AIImageClientProviders.cpp
+    ../src/AIGenerateDialog.cpp
+    ../src/AISettingsDialog.cpp
+    ../src/AICompositeDialog.cpp
+    ../src/AIProviderCatalog.cpp
+    ../src/CompositeHelper.cpp
+    ../src/RemoteSDHelper.cpp
+    ${TEST_CANVAS_BUNDLE}
+    ../include/AIWorkflowController.h
+    ../include/AIImageClient.h
+    ../include/AIGenerateDialog.h
+    ../include/AISettingsDialog.h
+    ../include/AICompositeDialog.h
+    ../include/RemoteSDHelper.h
+)
+target_include_directories(tst_AIWorkflowController PRIVATE ../include)
+target_link_libraries(tst_AIWorkflowController PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Test)
+add_test(NAME tst_AIWorkflowController COMMAND tst_AIWorkflowController)
+set_tests_properties(tst_AIWorkflowController PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+

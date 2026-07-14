@@ -21,6 +21,8 @@ private slots:
     void curve_roundTrip();
     void bezier_roundTrip();
     void spline_roundTrip();
+    void arc_roundTrip();
+    void dimension_roundTrip();
     void colorAndWidth_preserved();
 };
 
@@ -178,6 +180,40 @@ void tst_PrimitiveRoundTrip::spline_roundTrip()
     QCOMPARE(static_cast<int>(s->points().size()), 3);
     QCOMPARE(s->isClosed(), true);
     QCOMPARE(s->smoothness(), 0.75f);
+}
+
+void tst_PrimitiveRoundTrip::arc_roundTrip()
+{
+    ArcPrimitive src(QVector2D(10, 10), 25.f, 15.f, 120.f);
+    src.setColor(QColor(Qt::magenta));
+
+    auto out = roundTrip(src);
+    QVERIFY(out);
+    QCOMPARE(out->type(), PrimitiveType::Arc);
+    auto *a = dynamic_cast<ArcPrimitive *>(out.get());
+    QVERIFY(a);
+    QCOMPARE(a->center(), QVector2D(10, 10));
+    QCOMPARE(a->radius(), 25.f);
+    QCOMPARE(a->startAngle(), 15.f);
+    QCOMPARE(a->endAngle(), 120.f);
+}
+
+void tst_PrimitiveRoundTrip::dimension_roundTrip()
+{
+    DimensionPrimitive src(QVector2D(0, 0), QVector2D(100, 0));
+    src.setUnitsString(QStringLiteral("mm"));
+    src.setPixelsPerUnit(2.f);
+    src.recalculateMeasurement();
+
+    auto out = roundTrip(src);
+    QVERIFY(out);
+    QCOMPARE(out->type(), PrimitiveType::Dimension);
+    auto *d = dynamic_cast<DimensionPrimitive *>(out.get());
+    QVERIFY(d);
+    QCOMPARE(d->startPoint(), QVector2D(0, 0));
+    QCOMPARE(d->endPoint(), QVector2D(100, 0));
+    QCOMPARE(d->getUnitsString(), QStringLiteral("mm"));
+    QCOMPARE(d->pixelsPerUnit(), 2.f);
 }
 
 void tst_PrimitiveRoundTrip::colorAndWidth_preserved()

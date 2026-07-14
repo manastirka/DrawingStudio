@@ -168,12 +168,36 @@ void AIWorkflowController::onAIImageFinished(const QImage &image, const QString 
 }
 
 
+// --- setAIImageClient ---
+void AIWorkflowController::setAIImageClient(AIImageClient *client)
+{
+    if (m_aiImageClient == client)
+        return;
+    if (m_aiImageClient && m_aiImageClient->parent() == this) {
+        delete m_aiImageClient;
+    }
+    m_aiImageClient = client;
+    if (m_aiImageClient && m_aiImageClient->parent() != this)
+        m_aiImageClient->setParent(this);
+    m_aiClientSignalsWired = false;
+    wireAIImageClientSignals();
+}
+
 // --- connectAIImageClient ---
 void AIWorkflowController::connectAIImageClient()
 {
-    if (m_aiImageClient)
+    if (!m_aiImageClient)
+        m_aiImageClient = new AIImageClient(this);
+    wireAIImageClientSignals();
+}
+
+// --- wireAIImageClientSignals ---
+void AIWorkflowController::wireAIImageClientSignals()
+{
+    if (!m_aiImageClient || m_aiClientSignalsWired)
         return;
-    m_aiImageClient = new AIImageClient(this);
+    m_aiClientSignalsWired = true;
+
     connect(m_aiImageClient, &AIImageClient::started, this, [this](const QString &msg) {
         setStatusText(msg);
         showStatusMessage(msg, 0);
@@ -199,7 +223,10 @@ void AIWorkflowController::connectAIImageClient()
             showStatusMessage(QStringLiteral("AI job cancelled"), 3000);
             return;
         }
-        QMessageBox::critical(dialogParent(), QStringLiteral("AI Image"), err);
+        // Avoid modal dialogs in headless unit tests (no dialog parent).
+        if (dialogParent()) {
+            QMessageBox::critical(dialogParent(), QStringLiteral("AI Image"), err);
+        }
     });
 }
 

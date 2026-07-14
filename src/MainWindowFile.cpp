@@ -148,6 +148,25 @@ void MainWindow::checkRecoveryFileOnStartup()
     }
 }
 
+void MainWindow::resetWindowLayout()
+{
+    QSettings settings;
+    settings.remove(QStringLiteral("geometry"));
+    settings.remove(QStringLiteral("windowState"));
+    resize(1200, 800);
+    // Drop saved dock state for this version so defaults re-apply next launch too.
+    settings.setValue(QStringLiteral("windowState"), QByteArray());
+    if (m_statusLabel) {
+        m_statusLabel->setText(
+            QStringLiteral("Window layout reset — restart app for full dock defaults"));
+    }
+    QMessageBox::information(
+        this, QStringLiteral("Reset Layout"),
+        QStringLiteral(
+            "Window size was reset.\n"
+            "Restart Drawing Studio to fully restore default dock positions."));
+}
+
 void MainWindow::syncModifiedFlag()
 {
     m_isModified = !(m_commandManager && m_commandManager->isClean());
