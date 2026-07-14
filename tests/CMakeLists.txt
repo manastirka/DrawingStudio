@@ -275,6 +275,24 @@ target_include_directories(tst_PrimitiveJsonOps PRIVATE ../include)
 target_link_libraries(tst_PrimitiveJsonOps PRIVATE Qt6::Core Qt6::Gui Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Test Qt6::Network Qt6::Widgets)
 add_test(NAME tst_PrimitiveJsonOps COMMAND tst_PrimitiveJsonOps)
 
+# Primitive toJson/createFromJson round-trip (week-3 safety)
+add_executable(tst_PrimitiveRoundTrip
+    tst_PrimitiveRoundTrip.cpp
+    ${DRAWING_PRIMITIVE_SOURCES}
+    ${IMAGE_PRIMITIVE_SOURCES}
+    ../src/SAM2Client.cpp
+    ../src/MaskCache.cpp
+    ../src/CanvasRenderer.cpp
+    ../include/DrawingPrimitive.h
+    ../include/ImagePrimitive.h
+    ../include/SAM2Client.h
+    ../include/MaskCache.h
+)
+target_include_directories(tst_PrimitiveRoundTrip PRIVATE ../include)
+target_link_libraries(tst_PrimitiveRoundTrip PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Test)
+add_test(NAME tst_PrimitiveRoundTrip COMMAND tst_PrimitiveRoundTrip)
+
 # UnitsConverter
 add_executable(tst_UnitsConverter
     tst_UnitsConverter.cpp

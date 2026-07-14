@@ -18,6 +18,7 @@ class tst_ProjectFileService : public QObject {
 private slots:
     void saveWritesLayersAndPrimitives();
     void loadRoundTripRestoresLine();
+    void silentSave_doesNotTouchSessionCallbacks();
 };
 
 void tst_ProjectFileService::saveWritesLayersAndPrimitives()
@@ -85,6 +86,36 @@ void tst_ProjectFileService::loadRoundTripRestoresLine()
     QVERIFY(line);
     QCOMPARE(line->startPoint(), QVector2D(5, 6));
     QCOMPARE(line->endPoint(), QVector2D(7, 8));
+}
+
+void tst_ProjectFileService::silentSave_doesNotTouchSessionCallbacks()
+{
+    LayerManager layers;
+    layers.addPrimitiveToActiveLayer(
+        std::make_unique<LinePrimitive>(QVector2D(0, 0), QVector2D(1, 1)));
+
+    int currentFileCalls = 0;
+    int recentCalls = 0;
+    QString lastStatus;
+
+    ProjectFileService svc;
+    ProjectFileService::Host host;
+    host.layerManager = &layers;
+    host.setCurrentFile = [&](const QString &) { ++currentFileCalls; };
+    host.addToRecentFiles = [&](const QString &) { ++recentCalls; };
+    host.setStatusText = [&](const QString &s) { lastStatus = s; };
+    svc.setHost(host);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("autosave.drawing"));
+    QVERIFY(svc.saveToFile(path, /*updateSession=*/false));
+
+    QCOMPARE(currentFileCalls, 0);
+    QCOMPARE(recentCalls, 0);
+    QVERIFY(lastStatus.contains(QStringLiteral("Autosaved"), Qt::CaseInsensitive)
+            || lastStatus.contains(QStringLiteral("recovery"), Qt::CaseInsensitive));
+    QVERIFY(QFileInfo::exists(path));
 }
 
 QTEST_MAIN(tst_ProjectFileService)
