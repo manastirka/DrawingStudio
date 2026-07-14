@@ -329,3 +329,204 @@ target_include_directories(tst_SelectionTransform PRIVATE ../include)
 target_link_libraries(tst_SelectionTransform PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME tst_SelectionTransform COMMAND tst_SelectionTransform)
 
+# ---------------------------------------------------------------------------
+# Week-1 safety net: LayerManager, CommandServer, ProjectFile, Dispatcher
+# ---------------------------------------------------------------------------
+
+# QObject headers needed so AUTOMOC emits vtables for canvas/primitives stack
+set(TEST_CANVAS_MOC_HEADERS
+    ../include/DrawingCanvas.h
+    ../include/LayerManager.h
+    ../include/SelectionManager.h
+    ../include/GridManager.h
+    ../include/CommandManager.h
+    ../include/DrawingPrimitive.h
+    ../include/ImagePrimitive.h
+    ../include/SAM2Client.h
+    ../include/MaskCache.h
+    ../include/ClassicTextTool.h
+    ../include/EdgeSelectionTool.h
+    ../include/CanvasSnapshot.h
+)
+
+# Drawing canvas + deps (shared by dispatcher / command-server link)
+set(TEST_CANVAS_BUNDLE
+    ${TEST_CANVAS_MOC_HEADERS}
+    ../src/DrawingCanvas.cpp
+    ../src/DrawingCanvasDocument.cpp
+    ../src/DrawingCanvasFacades.cpp
+    ../src/DrawingCanvasHosts.cpp
+    ../src/DrawingCanvasInput.cpp
+    ../src/DrawingCanvasPaint.cpp
+    ../src/AirbrushEngine.cpp
+    ../src/AlignmentGuides.cpp
+    ../src/BrushStrokeOps.cpp
+    ../src/BrushStrokePrimitive.cpp
+    ../src/CanvasContextMenu.cpp
+    ../src/CanvasCoords.cpp
+    ../src/CanvasGeometry.cpp
+    ../src/CanvasKeyMap.cpp
+    ../src/CanvasPaintPipeline.cpp
+    ../src/CanvasPrimitiveOps.cpp
+    ../src/CanvasRenderer.cpp
+    ../src/CanvasZoom.cpp
+    ../src/ControlPointEditController.cpp
+    ../src/ControlPointHit.cpp
+    ../src/DrawingToolRegistry.cpp
+    ../src/GridManager.cpp
+    ../src/GroupOps.cpp
+    ../src/InteractionCancel.cpp
+    ../src/InteractionPhase.cpp
+    ../src/Layer.cpp
+    ../src/LayerManager.cpp
+    ../src/LayerOrderOps.cpp
+    ../src/LineMoveOps.cpp
+    ../src/MagneticSnap.cpp
+    ../src/MoveController.cpp
+    ../src/ObjectLayoutOps.cpp
+    ../src/OverlayRenderer.cpp
+    ../src/PaperModel.cpp
+    ../src/PathToolFinalize.cpp
+    ../src/PrimitiveJsonOps.cpp
+    ../src/RulerRenderer.cpp
+    ../src/SelectController.cpp
+    ../src/SelectionGestureController.cpp
+    ../src/SelectionManager.cpp
+    ../src/SelectionPolicy.cpp
+    ../src/SelectionTransform.cpp
+    ../src/SmartDrawingConstraints.cpp
+    ../src/TextRenderer.cpp
+    ../src/TextResizeOps.cpp
+    ../src/ToolCursor.cpp
+    ../src/ToolSwitchOps.cpp
+    ../src/UnitsConverter.cpp
+    ../src/ViewPanController.cpp
+    ../src/ClassicTextTool.cpp
+    ../src/ClassicTextToolEditor.cpp
+    ../src/ClassicTextToolInput.cpp
+    ../src/ClassicTextToolResize.cpp
+    ../src/CommandManager.cpp
+    ../src/Commands.cpp
+    ../src/CommandsLayers.cpp
+    ../src/CommandsImageMask.cpp
+    ../src/CommandsText.cpp
+    ../src/CommandsSnapshot.cpp
+    ${DRAWING_PRIMITIVE_SOURCES}
+    ${IMAGE_PRIMITIVE_SOURCES}
+    ../src/SAM2Client.cpp
+    ../src/MaskCache.cpp
+    ../src/EdgeSelectionTool.cpp
+    ../src/DXFExporter.cpp
+    ../src/CanvasSnapshot.cpp
+    ../src/tools/AngleLineTool.cpp
+    ../src/tools/ArcTool.cpp
+    ../src/tools/BezierTool.cpp
+    ../src/tools/BlurTool.cpp
+    ../src/tools/BrushTool.cpp
+    ../src/tools/CircleTool.cpp
+    ../src/tools/CurveTool.cpp
+    ../src/tools/EllipseTool.cpp
+    ../src/tools/EraserTool.cpp
+    ../src/tools/FillTool.cpp
+    ../src/tools/ImageTool.cpp
+    ../src/tools/LineTool.cpp
+    ../src/tools/MeasureTool.cpp
+    ../src/tools/MoveTool.cpp
+    ../src/tools/PolygonTool.cpp
+    ../src/tools/RectangleTool.cpp
+    ../src/tools/SelectTool.cpp
+    ../src/tools/SplineTool.cpp
+    ../src/tools/TextTool.cpp
+)
+
+set(TEST_DISPATCHER_SOURCES
+    ../src/DrawingCommandDispatcher.cpp
+    ../src/DrawingCommandDispatcherDraw.cpp
+    ../src/DrawingCommandDispatcherEdit.cpp
+    ../src/DrawingCommandDispatcherIO.cpp
+    ../src/DrawingCommandDispatcherImage.cpp
+    ../src/ImageToDrawingEngine.cpp
+    ../src/ImageToDrawingEngineMosaic.cpp
+    ../src/ImageToDrawingEngineTrace.cpp
+    ../src/ImageToDrawingEnginePhotoCopy.cpp
+)
+
+# LayerManager (light) — still needs MOC for LayerManager / DrawingPrimitive
+add_executable(tst_LayerManager
+    tst_LayerManager.cpp
+    ../src/LayerManager.cpp
+    ../src/Layer.cpp
+    ${DRAWING_PRIMITIVE_SOURCES}
+    ${IMAGE_PRIMITIVE_SOURCES}
+    ../src/SAM2Client.cpp
+    ../src/MaskCache.cpp
+    ../src/CanvasRenderer.cpp
+    ../include/LayerManager.h
+    ../include/DrawingPrimitive.h
+    ../include/ImagePrimitive.h
+    ../include/SAM2Client.h
+    ../include/MaskCache.h
+)
+target_include_directories(tst_LayerManager PRIVATE ../include)
+target_link_libraries(tst_LayerManager PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Test)
+add_test(NAME tst_LayerManager COMMAND tst_LayerManager)
+
+# CommandServer HTTP (links canvas symbols referenced by server endpoints)
+add_executable(tst_CommandServer
+    tst_CommandServer.cpp
+    ../src/CommandServer.cpp
+    ../include/CommandServer.h
+    ${TEST_CANVAS_BUNDLE}
+)
+target_include_directories(tst_CommandServer PRIVATE ../include)
+target_link_libraries(tst_CommandServer PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Test)
+add_test(NAME tst_CommandServer COMMAND tst_CommandServer)
+set_tests_properties(tst_CommandServer PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Project save/load via LayerManager (+ spinner widgets on load)
+add_executable(tst_ProjectFileService
+    tst_ProjectFileService.cpp
+    stubs/DrawingCanvasProjectStubs.cpp
+    ../src/ProjectFileService.cpp
+    ../src/LayerManager.cpp
+    ../src/Layer.cpp
+    ../src/CommandManager.cpp
+    ../src/SpinnerDialog.cpp
+    ../src/ColorfulSpinner.cpp
+    ${DRAWING_PRIMITIVE_SOURCES}
+    ${IMAGE_PRIMITIVE_SOURCES}
+    ../src/SAM2Client.cpp
+    ../src/MaskCache.cpp
+    ../src/CanvasRenderer.cpp
+    ../include/LayerManager.h
+    ../include/CommandManager.h
+    ../include/DrawingPrimitive.h
+    ../include/ImagePrimitive.h
+    ../include/SAM2Client.h
+    ../include/MaskCache.h
+    ../include/SpinnerDialog.h
+    ../include/ColorfulSpinner.h
+    ../include/ProjectFileService.h
+)
+target_include_directories(tst_ProjectFileService PRIVATE ../include)
+target_link_libraries(tst_ProjectFileService PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Test)
+add_test(NAME tst_ProjectFileService COMMAND tst_ProjectFileService)
+set_tests_properties(tst_ProjectFileService PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(tst_DrawingCommandDispatcher
+    tst_DrawingCommandDispatcher.cpp
+    ${TEST_CANVAS_BUNDLE}
+    ${TEST_DISPATCHER_SOURCES}
+)
+target_include_directories(tst_DrawingCommandDispatcher PRIVATE ../include)
+target_link_libraries(tst_DrawingCommandDispatcher PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Test)
+add_test(NAME tst_DrawingCommandDispatcher COMMAND tst_DrawingCommandDispatcher)
+set_tests_properties(tst_DrawingCommandDispatcher PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
