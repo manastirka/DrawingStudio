@@ -504,6 +504,12 @@ set(TEST_DISPATCHER_SOURCES
     ../src/ImageToDrawingEnginePhotoCopy.cpp
 )
 
+# Shared canvas stack — compile once (was 3× duplicate builds; OOMs GHA macOS).
+add_library(ds_test_canvas STATIC ${TEST_CANVAS_BUNDLE})
+target_include_directories(ds_test_canvas PUBLIC ../include)
+target_link_libraries(ds_test_canvas PUBLIC
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets)
+
 # LayerManager (light) — still needs MOC for LayerManager / DrawingPrimitive
 add_executable(tst_LayerManager
     tst_LayerManager.cpp
@@ -530,10 +536,10 @@ add_executable(tst_CommandServer
     tst_CommandServer.cpp
     ../src/CommandServer.cpp
     ../include/CommandServer.h
-    ${TEST_CANVAS_BUNDLE}
 )
 target_include_directories(tst_CommandServer PRIVATE ../include)
 target_link_libraries(tst_CommandServer PRIVATE
+    ds_test_canvas
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Test)
 add_test(NAME tst_CommandServer COMMAND tst_CommandServer)
 set_tests_properties(tst_CommandServer PROPERTIES
@@ -573,11 +579,11 @@ set_tests_properties(tst_ProjectFileService PROPERTIES
 
 add_executable(tst_DrawingCommandDispatcher
     tst_DrawingCommandDispatcher.cpp
-    ${TEST_CANVAS_BUNDLE}
     ${TEST_DISPATCHER_SOURCES}
 )
 target_include_directories(tst_DrawingCommandDispatcher PRIVATE ../include)
 target_link_libraries(tst_DrawingCommandDispatcher PRIVATE
+    ds_test_canvas
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Test)
 add_test(NAME tst_DrawingCommandDispatcher COMMAND tst_DrawingCommandDispatcher)
 set_tests_properties(tst_DrawingCommandDispatcher PROPERTIES
@@ -598,7 +604,6 @@ add_executable(tst_AIWorkflowController
     ../src/AIProviderCatalog.cpp
     ../src/CompositeHelper.cpp
     ../src/RemoteSDHelper.cpp
-    ${TEST_CANVAS_BUNDLE}
     ../include/AIWorkflowController.h
     ../include/AIImageClient.h
     ../include/AIGenerateDialog.h
@@ -608,6 +613,7 @@ add_executable(tst_AIWorkflowController
 )
 target_include_directories(tst_AIWorkflowController PRIVATE ../include)
 target_link_libraries(tst_AIWorkflowController PRIVATE
+    ds_test_canvas
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Test)
 add_test(NAME tst_AIWorkflowController COMMAND tst_AIWorkflowController)
 set_tests_properties(tst_AIWorkflowController PROPERTIES

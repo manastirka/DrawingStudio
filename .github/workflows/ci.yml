@@ -10,6 +10,13 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Quiet Homebrew; avoid noisy/untrusted third-party taps on GHA images
+  HOMEBREW_NO_AUTO_UPDATE: '1'
+  HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: '1'
+  HOMEBREW_NO_INSTALL_CLEANUP: '1'
+  HOMEBREW_NO_ENV_HINTS: '1'
+
 jobs:
   unit-tests:
     name: Unit tests (macOS / Qt6)
@@ -18,17 +25,29 @@ jobs:
 
     steps:
       - name: Checkout
-        # v5 targets Node.js 24 (v4 still declares Node 20 and warns on runners)
+        # Node.js 24 runtime (avoids Node 20 deprecation on GHA runners)
         uses: actions/checkout@v5
 
       - name: Install Qt 6 + CMake + Ninja
         run: |
-          brew update
+          set -euo pipefail
+          # GHA macOS images sometimes ship untrusted third-party taps (warning noise).
+          brew untap aws/tap 2>/dev/null || true
+
           brew install qt@6 cmake ninja
+
+          QT_PREFIX="$(brew --prefix qt@6)"
+          echo "QT_PREFIX=${QT_PREFIX}" >> "${GITHUB_ENV}"
+          echo "${QT_PREFIX}/bin" >> "${GITHUB_PATH}"
+          echo "$(brew --prefix)/bin" >> "${GITHUB_PATH}"
+
+          cmake --version
+          ninja --version
+          ls "${QT_PREFIX}/lib/cmake/Qt6" | head
 
       - name: Configure (tests only — no SD app link)
         run: |
-          QT_PREFIX="$(brew --prefix qt@6)"
+          set -euo pipefail
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${QT_PREFIX}" \
@@ -36,7 +55,11 @@ jobs:
             -DBUILD_DRAWINGSTUDIO_TESTS=ON
 
       - name: Build tests
-        run: cmake --build build -j "$(sysctl -n hw.ncpu)"
+        run: |
+          set -euo pipefail
+          # Cap parallelism: full canvas test matrix OOMs easily on GHA macOS (7GB).
+          # Canvas sources are shared via ds_test_canvas STATIC now; still keep -j low.
+          cmake --build build --parallel 2
 
       - name: Run ctest
         working-directory: build
