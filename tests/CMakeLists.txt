@@ -362,6 +362,26 @@ target_include_directories(tst_SelectionTransform PRIVATE ../include)
 target_link_libraries(tst_SelectionTransform PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
 add_test(NAME tst_SelectionTransform COMMAND tst_SelectionTransform)
 
+# ObjectLayoutOps align / distribute (pure layout math)
+add_executable(tst_ObjectLayoutOps
+    tst_ObjectLayoutOps.cpp
+    ../src/ObjectLayoutOps.cpp
+    ${DRAWING_PRIMITIVE_SOURCES}
+    ${IMAGE_PRIMITIVE_SOURCES}
+    ../src/SAM2Client.cpp
+    ../src/MaskCache.cpp
+    ../src/CanvasRenderer.cpp
+    ../include/ObjectLayoutOps.h
+    ../include/DrawingPrimitive.h
+    ../include/ImagePrimitive.h
+    ../include/SAM2Client.h
+    ../include/MaskCache.h
+)
+target_include_directories(tst_ObjectLayoutOps PRIVATE ../include)
+target_link_libraries(tst_ObjectLayoutOps PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Test)
+add_test(NAME tst_ObjectLayoutOps COMMAND tst_ObjectLayoutOps)
+
 # ---------------------------------------------------------------------------
 # Week-1 safety net: LayerManager, CommandServer, ProjectFile, Dispatcher
 # ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 #include "AISettingsDialog.h"
+#include "AIImageClient.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -6,6 +7,7 @@
 #include <QDialogButtonBox>
 #include <QSettings>
 #include <QGroupBox>
+#include <QApplication>
 
 AISettingsDialog::AISettingsDialog(QWidget *parent)
     : QDialog(parent)
@@ -104,6 +106,18 @@ AISettingsDialog::AISettingsDialog(QWidget *parent)
     m_helpLabel->setStyleSheet(QStringLiteral("color: #9ca3af; font-size: 12px;"));
     root->addWidget(m_helpLabel);
 
+    auto *testRow = new QHBoxLayout();
+    m_testConnectionButton = new QPushButton(QStringLiteral("Test Connection"), this);
+    m_testConnectionButton->setToolTip(
+        QStringLiteral("Probe the active provider with the keys currently shown "
+                       "(does not require Save)."));
+    m_connectionStatusLabel = new QLabel(QStringLiteral("Not tested"), this);
+    m_connectionStatusLabel->setWordWrap(true);
+    m_connectionStatusLabel->setStyleSheet(QStringLiteral("color: #9ca3af; font-size: 12px;"));
+    testRow->addWidget(m_testConnectionButton);
+    testRow->addWidget(m_connectionStatusLabel, 1);
+    root->addLayout(testRow);
+
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
     connect(buttons, &QDialogButtonBox::accepted, this, &AISettingsDialog::saveAndAccept);
     connect(buttons, &QDialogButtonBox::rejected, this, &AISettingsDialog::reject);
@@ -111,6 +125,12 @@ AISettingsDialog::AISettingsDialog(QWidget *parent)
 
     connect(m_providerCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &AISettingsDialog::onProviderChanged);
+    connect(m_testConnectionButton, &QPushButton::clicked,
+            this, &AISettingsDialog::onTestConnection);
+
+    m_testClient = new AIImageClient(this);
+    connect(m_testClient, &AIImageClient::connectionTestFinished,
+            this, &AISettingsDialog::onConnectionTestFinished);
 
     loadSettings();
     updateVisibility();
@@ -211,7 +231,7 @@ void AISettingsDialog::updateVisibility()
     }
 }
 
-void AISettingsDialog::saveAndAccept()
+void AISettingsDialog::writeFormToSettings() const
 {
     QSettings s;
     const QString provider = m_providerCombo->currentData().toString();
@@ -234,5 +254,55 @@ void AISettingsDialog::saveAndAccept()
     s.setValue(QStringLiteral("AI/higgsfieldModel"), m_higgsfieldModel->currentText().trimmed());
     s.setValue(QStringLiteral("AI/remoteSDUrl"), m_remoteSdUrl->text().trimmed());
     s.setValue(QStringLiteral("AI/size"), m_sizeCombo->currentText());
+    s.sync();
+}
+
+void AISettingsDialog::onTestConnection()
+{
+    if (!m_testClient || !m_testConnectionButton)
+        return;
+
+    // Persist draft form so AIImageClient::testConnection can read keys/URL.
+    writeFormToSettings();
+
+    const QString provider = m_providerCombo->currentData().toString();
+    m_testConnectionButton->setEnabled(false);
+    m_connectionStatusLabel->setStyleSheet(QStringLiteral("color: #9ca3af; font-size: 12px;"));
+    m_connectionStatusLabel->setText(
+        QStringLiteral("Testing %1…").arg(providerDisplayName(provider)));
+    QApplication::processEvents();
+
+    m_testClient->testConnection(provider);
+}
+
+void AISettingsDialog::onConnectionTestFinished(bool ok, const QString &message)
+{
+    if (m_testConnectionButton)
+        m_testConnectionButton->setEnabled(true);
+
+    if (!m_connectionStatusLabel)
+        return;
+
+    if (ok) {
+        m_connectionStatusLabel->setStyleSheet(
+            QStringLiteral("color: #34d399; font-size: 12px;"));
+        m_connectionStatusLabel->setText(QStringLiteral("✓ %1").arg(message));
+    } else {
+        m_connectionStatusLabel->setStyleSheet(
+            QStringLiteral("color: #f87171; font-size: 12px;"));
+        m_connectionStatusLabel->setText(QStringLiteral("✗ %1").arg(message));
+    }
+
+    // Remember last health probe for status bar / debugging.
+    QSettings s;
+    s.setValue(QStringLiteral("AI/lastConnectionOk"), ok);
+    s.setValue(QStringLiteral("AI/lastConnectionMessage"), message);
+    s.setValue(QStringLiteral("AI/lastConnectionProvider"),
+               m_providerCombo ? m_providerCombo->currentData().toString() : QString());
+}
+
+void AISettingsDialog::saveAndAccept()
+{
+    writeFormToSettings();
     accept();
 }

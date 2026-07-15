@@ -165,6 +165,8 @@ void CommandServer::handleRequest(QTcpSocket *socket, const QByteArray &requestD
         handleCommandEndpoint(socket, body);
     } else if (path == "/api/batch" && method == "POST") {
         handleBatchEndpoint(socket, body);
+    } else if ((path == "/api/commands" || path == "/api/help") && method == "GET") {
+        handleCommandsCatalogEndpoint(socket);
     } else if (path == "/api/screenshot" && method == "GET") {
         handleScreenshotEndpoint(socket);
     } else if (path == "/api/window_screenshot" && method == "GET") {
@@ -246,7 +248,22 @@ void CommandServer::handleBatchEndpoint(QTcpSocket *socket, const QByteArray &bo
         return;
     }
 
+    if (commands.size() > kMaxBatchCommands) {
+        sendErrorResponse(socket, 400,
+            QStringLiteral("Batch too large: %1 commands (max %2)")
+                .arg(commands.size())
+                .arg(kMaxBatchCommands));
+        return;
+    }
+
+    // Optional: stop processing further commands after the first failure.
+    const bool stopOnError = obj.value(QStringLiteral("stopOnError")).toBool(false);
+
     QJsonArray results;
+    int okCount = 0;
+    int errorCount = 0;
+    bool stoppedEarly = false;
+
     for (int i = 0; i < commands.size(); ++i) {
         QJsonObject cmd = commands[i].toObject();
         QString action = cmd["action"].toString();
@@ -258,6 +275,11 @@ void CommandServer::handleBatchEndpoint(QTcpSocket *socket, const QByteArray &bo
             r["status"] = "error";
             r["message"] = "Missing 'action' field";
             results.append(r);
+            ++errorCount;
+            if (stopOnError) {
+                stoppedEarly = true;
+                break;
+            }
             continue;
         }
 
@@ -265,23 +287,227 @@ void CommandServer::handleBatchEndpoint(QTcpSocket *socket, const QByteArray &bo
 
         QJsonObject r;
         r["index"] = i;
-        r["status"] = "ok";
         r["action"] = action;
 
-        // Include command result data if available
         QJsonObject result = lastCommandResult();
         if (!result.isEmpty()) {
             r["result"] = result;
         }
 
+        // Mirror single-command semantics: success:false → per-item error.
+        const bool failed = result.contains(QStringLiteral("success"))
+            && !result.value(QStringLiteral("success")).toBool();
+        if (failed) {
+            r["status"] = "error";
+            if (result.contains(QStringLiteral("error"))) {
+                r["message"] = result.value(QStringLiteral("error")).toString();
+            }
+            ++errorCount;
+            results.append(r);
+            if (stopOnError) {
+                stoppedEarly = true;
+                break;
+            }
+            continue;
+        }
+
+        r["status"] = "ok";
+        ++okCount;
         results.append(r);
     }
 
     QJsonObject response;
-    response["status"] = "ok";
+    // overall "ok" if at least one command ran; "partial" / "error" by counts
+    if (errorCount == 0) {
+        response["status"] = "ok";
+    } else if (okCount == 0) {
+        response["status"] = "error";
+    } else {
+        response["status"] = "partial";
+    }
     response["count"] = commands.size();
+    response["okCount"] = okCount;
+    response["errorCount"] = errorCount;
+    response["processed"] = results.size();
+    if (stoppedEarly)
+        response["stoppedEarly"] = true;
     response["results"] = results;
-    sendJsonResponse(socket, 200, response);
+
+    // HTTP 200 for partial (client inspects status field); 400 only when all fail.
+    const int httpCode = (okCount == 0 && errorCount > 0) ? 400 : 200;
+    sendJsonResponse(socket, httpCode, response);
+}
+
+void CommandServer::handleCommandsCatalogEndpoint(QTcpSocket *socket)
+{
+    sendJsonResponse(socket, 200, commandsCatalog());
+}
+
+QJsonObject CommandServer::commandsCatalog()
+{
+    auto endpoint = [](const char *method, const char *path, const char *desc) {
+        QJsonObject o;
+        o[QStringLiteral("method")] = QString::fromUtf8(method);
+        o[QStringLiteral("path")] = QString::fromUtf8(path);
+        o[QStringLiteral("description")] = QString::fromUtf8(desc);
+        return o;
+    };
+
+    auto cmd = [](const char *action, const char *group, const QStringList &params,
+                  const char *desc) {
+        QJsonObject o;
+        o[QStringLiteral("action")] = QString::fromUtf8(action);
+        o[QStringLiteral("group")] = QString::fromUtf8(group);
+        o[QStringLiteral("description")] = QString::fromUtf8(desc);
+        QJsonArray p;
+        for (const QString &name : params)
+            p.append(name);
+        o[QStringLiteral("params")] = p;
+        return o;
+    };
+
+    QJsonArray endpoints;
+    endpoints.append(endpoint("GET", "/api/status", "Canvas status (size, objectCount, tool, zoom)"));
+    endpoints.append(endpoint("GET", "/api/commands", "This catalog (also /api/help)"));
+    endpoints.append(endpoint("GET", "/api/help", "Alias of /api/commands"));
+    endpoints.append(endpoint("GET", "/api/screenshot", "PNG of canvas content"));
+    endpoints.append(endpoint("GET", "/api/window_screenshot", "PNG of main window"));
+    endpoints.append(endpoint("GET", "/api/mask_debug", "JSON debug info for image masks"));
+    endpoints.append(endpoint("POST", "/api/command",
+                              "Run one bot command: {action, params}"));
+    endpoints.append(endpoint("POST", "/api/batch",
+                              "Run many commands: {commands:[{action,params}], stopOnError?}"));
+    endpoints.append(endpoint("POST", "/api/clear", "Clear canvas (with undo)"));
+    endpoints.append(endpoint("POST", "/api/undo", "Undo last edit"));
+    endpoints.append(endpoint("POST", "/api/redo", "Redo last undone edit"));
+
+    QJsonArray commands;
+    // Draw
+    commands.append(cmd("draw_line", "draw",
+                        {QStringLiteral("x1"), QStringLiteral("y1"), QStringLiteral("x2"),
+                         QStringLiteral("y2"), QStringLiteral("color"), QStringLiteral("lineWidth")},
+                        "Draw a line segment"));
+    commands.append(cmd("draw_line_multi", "draw",
+                        {QStringLiteral("points"), QStringLiteral("color"), QStringLiteral("lineWidth")},
+                        "Polyline from points array [[x,y],...]"));
+    commands.append(cmd("draw_rectangle", "draw",
+                        {QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("width"),
+                         QStringLiteral("height"), QStringLiteral("color"), QStringLiteral("filled")},
+                        "Axis-aligned rectangle"));
+    commands.append(cmd("draw_circle", "draw",
+                        {QStringLiteral("cx"), QStringLiteral("cy"), QStringLiteral("radius"),
+                         QStringLiteral("color"), QStringLiteral("filled")},
+                        "Circle"));
+    commands.append(cmd("draw_ellipse", "draw",
+                        {QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("width"),
+                         QStringLiteral("height"), QStringLiteral("color"), QStringLiteral("filled")},
+                        "Ellipse bounding box"));
+    commands.append(cmd("draw_polygon", "draw",
+                        {QStringLiteral("points"), QStringLiteral("color"), QStringLiteral("filled")},
+                        "Closed polygon"));
+    commands.append(cmd("draw_arc", "draw",
+                        {QStringLiteral("cx"), QStringLiteral("cy"), QStringLiteral("radius"),
+                         QStringLiteral("startAngle"), QStringLiteral("spanAngle"),
+                         QStringLiteral("color")},
+                        "Circular arc (degrees)"));
+    commands.append(cmd("draw_bezier", "draw",
+                        {QStringLiteral("points"), QStringLiteral("color"), QStringLiteral("lineWidth")},
+                        "Cubic bezier control points"));
+    commands.append(cmd("draw_spline", "draw",
+                        {QStringLiteral("points"), QStringLiteral("color"), QStringLiteral("lineWidth")},
+                        "Spline through points"));
+    commands.append(cmd("draw_text", "draw",
+                        {QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("text"),
+                         QStringLiteral("fontSize"), QStringLiteral("color")},
+                        "Text primitive"));
+    // Edit / view
+    commands.append(cmd("deselect", "edit", {}, "Clear selection"));
+    commands.append(cmd("select_all", "edit", {}, "Select all primitives"));
+    commands.append(cmd("delete_selected", "edit", {}, "Delete selection"));
+    commands.append(cmd("delete_primitive", "edit",
+                        {QStringLiteral("index")}, "Delete primitive by index"));
+    commands.append(cmd("copy_selected", "edit", {}, "Copy selection to clipboard"));
+    commands.append(cmd("cut_selected", "edit", {}, "Cut selection"));
+    commands.append(cmd("paste", "edit", {}, "Paste clipboard"));
+    commands.append(cmd("duplicate_selected", "edit", {}, "Duplicate selection"));
+    commands.append(cmd("clear_canvas", "edit", {}, "Remove all primitives"));
+    commands.append(cmd("undo", "edit", {}, "Undo"));
+    commands.append(cmd("redo", "edit", {}, "Redo"));
+    commands.append(cmd("set_tool", "edit",
+                        {QStringLiteral("tool")}, "Activate tool by name"));
+    commands.append(cmd("set_grid", "view",
+                        {QStringLiteral("visible"), QStringLiteral("snap")}, "Grid + snap flags"));
+    commands.append(cmd("set_background", "view",
+                        {QStringLiteral("color")}, "Canvas background color"));
+    commands.append(cmd("set_rulers", "view",
+                        {QStringLiteral("visible")}, "Show/hide rulers"));
+    commands.append(cmd("set_color", "style",
+                        {QStringLiteral("color")}, "Default stroke color"));
+    commands.append(cmd("set_line_width", "style",
+                        {QStringLiteral("width")}, "Default stroke width"));
+    commands.append(cmd("set_fill", "style",
+                        {QStringLiteral("enabled")}, "Default fill enabled"));
+    commands.append(cmd("zoom_fit", "view", {}, "Zoom to fit content"));
+    // I/O
+    commands.append(cmd("import_image", "io",
+                        {QStringLiteral("path"), QStringLiteral("x"), QStringLiteral("y"),
+                         QStringLiteral("width"), QStringLiteral("height")},
+                        "Import image file onto canvas"));
+    commands.append(cmd("export_png", "io",
+                        {QStringLiteral("path")}, "Export canvas as PNG"));
+    commands.append(cmd("export_image", "io",
+                        {QStringLiteral("path"), QStringLiteral("format"), QStringLiteral("quality")},
+                        "Export canvas image (format by path/param)"));
+    commands.append(cmd("export_dxf", "io",
+                        {QStringLiteral("path")}, "Export geometry as DXF"));
+    commands.append(cmd("list_export_formats", "io", {}, "List supported image export formats"));
+    commands.append(cmd("save_project", "io",
+                        {QStringLiteral("path")}, "Save .drawing project"));
+    commands.append(cmd("open_project", "io",
+                        {QStringLiteral("path")}, "Open .drawing project"));
+    // Image / mask
+    commands.append(cmd("sample_color", "image",
+                        {QStringLiteral("x"), QStringLiteral("y"), QStringLiteral("index")},
+                        "Sample pixel color from image"));
+    commands.append(cmd("sample_colors_grid", "image",
+                        {QStringLiteral("cols"), QStringLiteral("rows"), QStringLiteral("index")},
+                        "Sample color grid from image"));
+    commands.append(cmd("detect_subjects", "image",
+                        {QStringLiteral("index")}, "Run subject/mask detection"));
+    commands.append(cmd("get_mask_info", "image",
+                        {QStringLiteral("index")}, "Mask candidate info"));
+    commands.append(cmd("next_mask", "image", {}, "Select next mask candidate"));
+    commands.append(cmd("prev_mask", "image", {}, "Select previous mask candidate"));
+    commands.append(cmd("invert_mask", "image", {}, "Invert selected mask"));
+    commands.append(cmd("detect_edges", "image",
+                        {QStringLiteral("index")}, "Edge detection on image"));
+    commands.append(cmd("analyze_regions", "image",
+                        {QStringLiteral("index")}, "Region analysis on image"));
+    // Image-to-drawing engine
+    commands.append(cmd("render_mosaic", "image_to_drawing",
+                        {QStringLiteral("index"), QStringLiteral("cellSize")},
+                        "Mosaic geometry from image"));
+    commands.append(cmd("auto_trace", "image_to_drawing",
+                        {QStringLiteral("index")}, "Auto-trace image to vectors"));
+    commands.append(cmd("render_photo_copy", "image_to_drawing",
+                        {QStringLiteral("index")}, "Photo-copy line rendering"));
+
+    QJsonObject batch;
+    batch[QStringLiteral("maxCommands")] = kMaxBatchCommands;
+    batch[QStringLiteral("body")] = QStringLiteral(
+        "{ \"commands\": [ {\"action\":\"...\",\"params\":{...}} ], \"stopOnError\": false }");
+    batch[QStringLiteral("notes")] = QStringLiteral(
+        "Per-item status ok|error; overall status ok|partial|error. "
+        "HTTP 400 when every item fails or batch exceeds maxCommands.");
+
+    QJsonObject response;
+    response[QStringLiteral("status")] = QStringLiteral("ok");
+    response[QStringLiteral("version")] = 1;
+    response[QStringLiteral("endpoints")] = endpoints;
+    response[QStringLiteral("commands")] = commands;
+    response[QStringLiteral("batch")] = batch;
+    response[QStringLiteral("commandCount")] = commands.size();
+    return response;
 }
 
 void CommandServer::handleScreenshotEndpoint(QTcpSocket *socket)

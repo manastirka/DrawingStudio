@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QElapsedTimer>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSignalSpy>
@@ -21,6 +22,11 @@ private slots:
     void commandEmitsSignalAndUsesResultProvider();
     void unknownPathReturns404();
     void undoRedoEmitCommands();
+    void commandsCatalogEndpoint();
+    void staticCommandsCatalogShape();
+    void batchEmptyReturns400();
+    void batchTooLargeReturns400();
+    void batchPartialAndStopOnError();
 };
 
 // Same-thread QTcpServer needs processEvents while the client connects.
@@ -200,6 +206,140 @@ void tst_CommandServer::undoRedoEmitCommands()
     QCOMPARE(spy.count(), 2);
     QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("undo"));
     QCOMPARE(spy.at(1).at(0).toString(), QStringLiteral("redo"));
+    server.stop();
+}
+
+void tst_CommandServer::commandsCatalogEndpoint()
+{
+    CommandServer server;
+    const quint16 port = 19197;
+    QVERIFY(server.start(port));
+
+    const QJsonObject json = httpJson(QStringLiteral("GET"), QStringLiteral("/api/commands"),
+                                      {}, port);
+    QCOMPARE(json.value(QStringLiteral("status")).toString(), QStringLiteral("ok"));
+    QVERIFY(json.value(QStringLiteral("commandCount")).toInt() > 20);
+    QVERIFY(json.value(QStringLiteral("commands")).isArray());
+    QVERIFY(json.value(QStringLiteral("endpoints")).isArray());
+
+    // /api/help is an alias
+    const QJsonObject help = httpJson(QStringLiteral("GET"), QStringLiteral("/api/help"),
+                                      {}, port);
+    QCOMPARE(help.value(QStringLiteral("status")).toString(), QStringLiteral("ok"));
+    QCOMPARE(help.value(QStringLiteral("commandCount")).toInt(),
+             json.value(QStringLiteral("commandCount")).toInt());
+    server.stop();
+}
+
+void tst_CommandServer::staticCommandsCatalogShape()
+{
+    const QJsonObject cat = CommandServer::commandsCatalog();
+    QCOMPARE(cat.value(QStringLiteral("version")).toInt(), 1);
+    const QJsonObject batch = cat.value(QStringLiteral("batch")).toObject();
+    QCOMPARE(batch.value(QStringLiteral("maxCommands")).toInt(),
+             CommandServer::kMaxBatchCommands);
+
+    // Ensure draw_line is documented
+    bool foundDrawLine = false;
+    for (const QJsonValue &v : cat.value(QStringLiteral("commands")).toArray()) {
+        if (v.toObject().value(QStringLiteral("action")).toString()
+            == QStringLiteral("draw_line")) {
+            foundDrawLine = true;
+            break;
+        }
+    }
+    QVERIFY(foundDrawLine);
+}
+
+void tst_CommandServer::batchEmptyReturns400()
+{
+    CommandServer server;
+    const quint16 port = 19198;
+    QVERIFY(server.start(port));
+
+    QCOMPARE(httpStatus(QStringLiteral("POST"), QStringLiteral("/api/batch"),
+                        QByteArrayLiteral(R"({"commands":[]})"), port),
+             400);
+    server.stop();
+}
+
+void tst_CommandServer::batchTooLargeReturns400()
+{
+    CommandServer server;
+    const quint16 port = 19199;
+    QVERIFY(server.start(port));
+
+    QJsonArray cmds;
+    for (int i = 0; i < CommandServer::kMaxBatchCommands + 1; ++i) {
+        QJsonObject c;
+        c.insert(QStringLiteral("action"), QStringLiteral("deselect"));
+        c.insert(QStringLiteral("params"), QJsonObject{});
+        cmds.append(c);
+    }
+    QJsonObject body;
+    body.insert(QStringLiteral("commands"), cmds);
+    const QByteArray raw = QJsonDocument(body).toJson(QJsonDocument::Compact);
+
+    const QJsonObject json = httpJson(QStringLiteral("POST"), QStringLiteral("/api/batch"),
+                                      raw, port);
+    QCOMPARE(json.value(QStringLiteral("status")).toString(), QStringLiteral("error"));
+    QVERIFY(json.value(QStringLiteral("message")).toString().contains(QStringLiteral("too large")));
+    server.stop();
+}
+
+void tst_CommandServer::batchPartialAndStopOnError()
+{
+    CommandServer server;
+    const quint16 port = 19200;
+    QVERIFY(server.start(port));
+
+    // Result provider: first action fails, second succeeds.
+    int call = 0;
+    server.setCommandResultProvider([&call]() {
+        QJsonObject r;
+        if (call++ == 0) {
+            r.insert(QStringLiteral("success"), false);
+            r.insert(QStringLiteral("error"), QStringLiteral("boom"));
+        } else {
+            r.insert(QStringLiteral("success"), true);
+        }
+        return r;
+    });
+
+    QSignalSpy spy(&server, &CommandServer::commandReceived);
+    QVERIFY(spy.isValid());
+
+    // Without stopOnError: both run → partial
+    {
+        call = 0;
+        const QByteArray body = QByteArrayLiteral(
+            R"({"commands":[{"action":"a","params":{}},{"action":"b","params":{}}]})");
+        const QJsonObject json = httpJson(QStringLiteral("POST"), QStringLiteral("/api/batch"),
+                                          body, port);
+        QCOMPARE(json.value(QStringLiteral("status")).toString(), QStringLiteral("partial"));
+        QCOMPARE(json.value(QStringLiteral("okCount")).toInt(), 1);
+        QCOMPARE(json.value(QStringLiteral("errorCount")).toInt(), 1);
+        QCOMPARE(json.value(QStringLiteral("processed")).toInt(), 2);
+        QCOMPARE(spy.count(), 2);
+    }
+
+    // With stopOnError: only first runs
+    {
+        call = 0;
+        spy.clear();
+        const QByteArray body = QByteArrayLiteral(
+            R"({"stopOnError":true,"commands":[{"action":"a","params":{}},{"action":"b","params":{}}]})");
+        const QJsonObject json = httpJson(QStringLiteral("POST"), QStringLiteral("/api/batch"),
+                                          body, port);
+        // first fails → okCount 0 → overall error + HTTP 400 semantics via status field
+        QCOMPARE(json.value(QStringLiteral("status")).toString(), QStringLiteral("error"));
+        QCOMPARE(json.value(QStringLiteral("okCount")).toInt(), 0);
+        QCOMPARE(json.value(QStringLiteral("errorCount")).toInt(), 1);
+        QCOMPARE(json.value(QStringLiteral("processed")).toInt(), 1);
+        QVERIFY(json.value(QStringLiteral("stoppedEarly")).toBool());
+        QCOMPARE(spy.count(), 1);
+    }
+
     server.stop();
 }
 

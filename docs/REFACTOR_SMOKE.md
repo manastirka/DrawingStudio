@@ -28,9 +28,11 @@ Optional API smoke (starts the app if needed):
 ## Command server (port 19100)
 
 1. `GET /api/status` → `"status":"ok"`  
-2. `POST /api/command` `draw_line` → geometry + objectCount +1  
-3. `POST /api/undo` → objectCount back  
-4. Optional: `import_image` → `render_mosaic` / `auto_trace` / `render_photo_copy`  
+2. `GET /api/commands` (or `/api/help`) → catalog with `commandCount` + `draw_line`  
+3. `POST /api/command` `draw_line` → geometry + objectCount +1  
+4. `POST /api/undo` → objectCount back  
+5. Optional: `POST /api/batch` with `stopOnError` (max 100 commands)  
+6. Optional: `import_image` → `render_mosaic` / `auto_trace` / `render_photo_copy`  
 
 ## Mask (if touched)
 
@@ -41,10 +43,14 @@ Optional API smoke (starts the app if needed):
 
 | Check | Result | When |
 |-------|--------|------|
-| `cmake --build` + `ctest` (28 tests) | PASS | 2026-07-14 |
-| Command server smoke script | PASS (draw + undo) | 2026-07-14 |
+| `cmake --build` + `ctest` (30 tests) | PASS | 2026-07-15 |
+| Command API catalog + batch limits | covered by `tst_CommandServer` | 2026-07-15 |
+| Object align/distribute | covered by `tst_ObjectLayoutOps` | 2026-07-15 |
+| AI connection missing-key paths | covered by `tst_AIImageClient` | 2026-07-15 |
+| Command server smoke script | PASS (catalog + draw + undo) | 2026-07-15 |
 | Primitive JSON round-trip | covered by `tst_PrimitiveRoundTrip` | 2026-07-14 |
 | Silent autosave session callbacks | covered by `tst_ProjectFileService` | 2026-07-14 |
 | Manual UI (items 1–8) | _operator_ | — |
+| AI Settings → Test Connection | _operator_ | — |
 
 Dead code: `docs/archive/ImageAdjustments*.cpp` (not built).

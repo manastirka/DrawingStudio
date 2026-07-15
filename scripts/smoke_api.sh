@@ -70,6 +70,14 @@ echo "$STATUS" | grep -q '"status":"ok"' || {
 }
 BEFORE=$(echo "$STATUS" | python3 -c "import sys,json; print(json.load(sys.stdin).get('objectCount',0))")
 
+echo "== commands catalog =="
+CATALOG=$(curl -sf --max-time 3 "$BASE/api/commands")
+echo "$CATALOG" | grep -q '"status":"ok"' || {
+  echo "commands catalog failed: $CATALOG" >&2
+  exit 1
+}
+echo "$CATALOG" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('commandCount',0)>20; assert 'draw_line' in [c.get('action') for c in d.get('commands',[])]"
+
 echo "== draw_line =="
 DRAW=$(curl -sf --max-time 5 -X POST "$BASE/api/command" \
   -H 'Content-Type: application/json' \

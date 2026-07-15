@@ -2,6 +2,7 @@
 
 #include <QCoreApplication>
 #include <QImage>
+#include <QSettings>
 #include <QSignalSpy>
 #include <QTimer>
 #include <QtTest>
@@ -57,6 +58,9 @@ private slots:
     void realClient_cancelWhenIdle_isNoOp();
     void fake_generate_emitsFinishedImage();
     void fake_cancel_preventsFinished();
+    void testConnection_missingOpenAIKey();
+    void testConnection_missingNanoBananaKey();
+    void testConnection_unknownProvider();
 };
 
 void tst_AIImageClient::realClient_emptyPrompt_fails()
@@ -143,5 +147,50 @@ void tst_AIImageClient::fake_cancel_preventsFinished()
     QVERIFY(!client.isBusy());
 }
 
+void tst_AIImageClient::testConnection_missingOpenAIKey()
+{
+    QSettings s;
+    s.setValue(QStringLiteral("AI/openaiApiKey"), QString());
+    s.setValue(QStringLiteral("AI/apiKey"), QString());
+    s.sync();
+
+    AIImageClient client;
+    QSignalSpy spy(&client, &AIImageClient::connectionTestFinished);
+    QVERIFY(spy.isValid());
+
+    client.testConnection(QStringLiteral("openai"));
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toBool(), false);
+    QVERIFY(spy.at(0).at(1).toString().contains(QStringLiteral("Missing"), Qt::CaseInsensitive));
+}
+
+void tst_AIImageClient::testConnection_missingNanoBananaKey()
+{
+    QSettings s;
+    s.setValue(QStringLiteral("AI/nanoBananaApiKey"), QString());
+    s.setValue(QStringLiteral("AI/googleApiKey"), QString());
+    s.sync();
+
+    AIImageClient client;
+    QSignalSpy spy(&client, &AIImageClient::connectionTestFinished);
+
+    client.testConnection(QStringLiteral("nanobanana"));
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toBool(), false);
+    QVERIFY(spy.at(0).at(1).toString().contains(QStringLiteral("Missing"), Qt::CaseInsensitive));
+}
+
+void tst_AIImageClient::testConnection_unknownProvider()
+{
+    AIImageClient client;
+    QSignalSpy spy(&client, &AIImageClient::connectionTestFinished);
+
+    client.testConnection(QStringLiteral("not-a-provider"));
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toBool(), false);
+    QVERIFY(spy.at(0).at(1).toString().contains(QStringLiteral("Unknown"), Qt::CaseInsensitive));
+}
+
 QTEST_MAIN(tst_AIImageClient)
 #include "tst_AIImageClient.moc"
+

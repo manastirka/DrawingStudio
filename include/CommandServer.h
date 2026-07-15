@@ -36,6 +36,12 @@ public:
         m_resultProvider = std::move(provider);
     }
 
+    /** Static OpenAPI-ish catalog of HTTP endpoints + bot command actions. */
+    static QJsonObject commandsCatalog();
+
+    /** Hard cap for POST /api/batch command array length. */
+    static constexpr int kMaxBatchCommands = 100;
+
 signals:
     void commandReceived(const QString &action, const QJsonObject &params);
 
@@ -51,6 +57,7 @@ private:
 
     void handleCommandEndpoint(QTcpSocket *socket, const QByteArray &body);
     void handleBatchEndpoint(QTcpSocket *socket, const QByteArray &body);
+    void handleCommandsCatalogEndpoint(QTcpSocket *socket);
     void handleScreenshotEndpoint(QTcpSocket *socket);
     void handleWindowScreenshotEndpoint(QTcpSocket *socket);
     void handleMaskDebugEndpoint(QTcpSocket *socket);
