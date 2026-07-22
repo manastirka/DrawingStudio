@@ -351,7 +351,10 @@ bool AIWorkflowController::ensureRemoteSDHelper() {
     // initialize() probes the server (5s timeout); only succeeds when reachable.
     if (!m_remoteSDHelper->isInitialized()) {
         QSettings settings;
-        QString url = settings.value("AI/remoteSDUrl", "http://192.168.1.58:8000").toString();
+        QString url = settings
+                          .value(QStringLiteral("AI/remoteSDUrl"),
+                                 AIImageClient::defaultRemoteSdUrl())
+                          .toString();
         m_remoteSDHelper->initialize(url);
     }
     return m_remoteSDHelper->isInitialized();
@@ -366,5 +369,4 @@ void AIWorkflowController::onImageGenerated(const QImage& image, const QString& 
         m_host.canvas->addPrimitiveWithCommand(std::move(img));
     }
 }
-
 

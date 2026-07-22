@@ -20,6 +20,7 @@ AISettingsDialog::AISettingsDialog(QWidget *parent)
 
     auto *form = new QFormLayout();
     m_providerCombo = new QComboBox(this);
+    m_providerCombo->setObjectName(QStringLiteral("aiProviderCombo"));
     m_providerCombo->addItem(QStringLiteral("OpenAI (DALL·E)"), QStringLiteral("openai"));
     m_providerCombo->addItem(QStringLiteral("Stability AI"), QStringLiteral("stability"));
     m_providerCombo->addItem(QStringLiteral("Nano Banana (Google Gemini)"), QStringLiteral("nanobanana"));
@@ -37,6 +38,7 @@ AISettingsDialog::AISettingsDialog(QWidget *parent)
     auto *openaiBox = new QGroupBox(QStringLiteral("OpenAI"), this);
     auto *openaiForm = new QFormLayout(openaiBox);
     m_openaiKey = new QLineEdit(openaiBox);
+    m_openaiKey->setObjectName(QStringLiteral("openaiApiKeyEdit"));
     m_openaiKey->setEchoMode(QLineEdit::Password);
     m_openaiKey->setPlaceholderText(QStringLiteral("sk-..."));
     m_openaiModel = new QLineEdit(openaiBox);
@@ -48,6 +50,7 @@ AISettingsDialog::AISettingsDialog(QWidget *parent)
     auto *stabilityBox = new QGroupBox(QStringLiteral("Stability AI"), this);
     auto *stabilityForm = new QFormLayout(stabilityBox);
     m_stabilityKey = new QLineEdit(stabilityBox);
+    m_stabilityKey->setObjectName(QStringLiteral("stabilityApiKeyEdit"));
     m_stabilityKey->setEchoMode(QLineEdit::Password);
     m_stabilityKey->setPlaceholderText(QStringLiteral("sk-..."));
     stabilityForm->addRow(QStringLiteral("API key"), m_stabilityKey);
@@ -56,6 +59,7 @@ AISettingsDialog::AISettingsDialog(QWidget *parent)
     auto *nbBox = new QGroupBox(QStringLiteral("Nano Banana (Google AI)"), this);
     auto *nbForm = new QFormLayout(nbBox);
     m_nanoBananaKey = new QLineEdit(nbBox);
+    m_nanoBananaKey->setObjectName(QStringLiteral("nanoBananaApiKeyEdit"));
     m_nanoBananaKey->setEchoMode(QLineEdit::Password);
     m_nanoBananaKey->setPlaceholderText(QStringLiteral("AIza... (Google AI Studio key)"));
     m_nanoBananaModel = new QComboBox(nbBox);
@@ -76,8 +80,10 @@ AISettingsDialog::AISettingsDialog(QWidget *parent)
     m_higgsfieldUseCli = new QCheckBox(QStringLiteral("Use local higgsfield CLI (recommended)"), hfBox);
     m_higgsfieldUseCli->setChecked(true);
     m_higgsfieldCliPath = new QLineEdit(hfBox);
+    m_higgsfieldCliPath->setObjectName(QStringLiteral("higgsfieldCliPathEdit"));
     m_higgsfieldCliPath->setPlaceholderText(QStringLiteral("higgsfield (or full path)"));
     m_higgsfieldKey = new QLineEdit(hfBox);
+    m_higgsfieldKey->setObjectName(QStringLiteral("higgsfieldApiKeyEdit"));
     m_higgsfieldKey->setEchoMode(QLineEdit::Password);
     m_higgsfieldKey->setPlaceholderText(QStringLiteral("Optional cloud API key"));
     m_higgsfieldModel = new QComboBox(hfBox);
@@ -97,7 +103,8 @@ AISettingsDialog::AISettingsDialog(QWidget *parent)
     auto *remoteBox = new QGroupBox(QStringLiteral("Remote Stable Diffusion"), this);
     auto *remoteForm = new QFormLayout(remoteBox);
     m_remoteSdUrl = new QLineEdit(remoteBox);
-    m_remoteSdUrl->setPlaceholderText(QStringLiteral("http://192.168.1.58:8000"));
+    m_remoteSdUrl->setObjectName(QStringLiteral("remoteSdUrlEdit"));
+    m_remoteSdUrl->setPlaceholderText(AIImageClient::defaultRemoteSdUrl());
     remoteForm->addRow(QStringLiteral("Server URL"), m_remoteSdUrl);
     root->addWidget(remoteBox);
 
@@ -108,6 +115,7 @@ AISettingsDialog::AISettingsDialog(QWidget *parent)
 
     auto *testRow = new QHBoxLayout();
     m_testConnectionButton = new QPushButton(QStringLiteral("Test Connection"), this);
+    m_testConnectionButton->setObjectName(QStringLiteral("testAiConnectionButton"));
     m_testConnectionButton->setToolTip(
         QStringLiteral("Probe the active provider with the keys currently shown "
                        "(does not require Save)."));
@@ -197,8 +205,9 @@ void AISettingsDialog::loadSettings()
     }
     m_higgsfieldModel->setCurrentIndex(hfIdx);
 
-    m_remoteSdUrl->setText(s.value(QStringLiteral("AI/remoteSDUrl"),
-                                   QStringLiteral("http://192.168.1.58:8000")).toString());
+    m_remoteSdUrl->setText(
+        s.value(QStringLiteral("AI/remoteSDUrl"), AIImageClient::defaultRemoteSdUrl())
+            .toString());
 
     const QString size = s.value(QStringLiteral("AI/size"), QStringLiteral("1024x1024")).toString();
     const int sizeIdx = m_sizeCombo->findText(size);
@@ -252,7 +261,10 @@ void AISettingsDialog::writeFormToSettings() const
                    ? QStringLiteral("higgsfield")
                    : m_higgsfieldCliPath->text().trimmed());
     s.setValue(QStringLiteral("AI/higgsfieldModel"), m_higgsfieldModel->currentText().trimmed());
-    s.setValue(QStringLiteral("AI/remoteSDUrl"), m_remoteSdUrl->text().trimmed());
+    const QString remoteSdUrl = m_remoteSdUrl->text().trimmed();
+    s.setValue(QStringLiteral("AI/remoteSDUrl"),
+               remoteSdUrl.isEmpty() ? AIImageClient::defaultRemoteSdUrl()
+                                     : remoteSdUrl);
     s.setValue(QStringLiteral("AI/size"), m_sizeCombo->currentText());
     s.sync();
 }
@@ -262,17 +274,27 @@ void AISettingsDialog::onTestConnection()
     if (!m_testClient || !m_testConnectionButton)
         return;
 
-    // Persist draft form so AIImageClient::testConnection can read keys/URL.
-    writeFormToSettings();
-
     const QString provider = m_providerCombo->currentData().toString();
+    AIImageClient::ConnectionTestConfig config;
+    if (provider == QLatin1String("openai")) {
+        config.apiKey = m_openaiKey->text();
+    } else if (provider == QLatin1String("stability")) {
+        config.apiKey = m_stabilityKey->text();
+    } else if (provider == QLatin1String("nanobanana")) {
+        config.apiKey = m_nanoBananaKey->text();
+    } else if (provider == QLatin1String("higgsfield")) {
+        config.apiKey = m_higgsfieldKey->text();
+        config.higgsfieldCliPath = m_higgsfieldCliPath->text();
+    } else if (provider == QLatin1String("remotesd")) {
+        config.remoteSdUrl = m_remoteSdUrl->text();
+    }
     m_testConnectionButton->setEnabled(false);
     m_connectionStatusLabel->setStyleSheet(QStringLiteral("color: #9ca3af; font-size: 12px;"));
     m_connectionStatusLabel->setText(
         QStringLiteral("Testing %1…").arg(providerDisplayName(provider)));
     QApplication::processEvents();
 
-    m_testClient->testConnection(provider);
+    m_testClient->testConnection(provider, config);
 }
 
 void AISettingsDialog::onConnectionTestFinished(bool ok, const QString &message)

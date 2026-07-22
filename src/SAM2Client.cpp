@@ -5,12 +5,17 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QHostAddress>
 #include <QTimer>
 
 namespace {
 constexpr int kHealthTimeoutMs = 2000;
 constexpr int kSegmentationTimeoutMs = 60000;
 constexpr int kProgressTimeoutMs = 1500;
+constexpr const char *kProtocolHeader = "X-DrawingStudio-SAM2-Protocol";
+constexpr const char *kProtocolVersion = "2";
+
+QByteArray g_authToken;
 
 constexpr const char *kTimedOutProperty = "sam2_timed_out";
 constexpr const char *kTimeoutContextProperty = "sam2_timeout_context";
@@ -73,10 +78,34 @@ bool parseJsonObject(const QByteArray &data, QJsonObject &out,
 }
 } // namespace
 
+void SAM2Client::setDefaultAuthToken(const QByteArray &token) {
+  g_authToken = token.trimmed();
+}
+
+void SAM2Client::authorizeRequest(QNetworkRequest &request) {
+  request.setRawHeader("Accept", "application/json");
+  request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                       QNetworkRequest::ManualRedirectPolicy);
+  if (g_authToken.size() >= kMinAuthTokenBytes) {
+    request.setRawHeader("Authorization", "Bearer " + g_authToken);
+  }
+}
+
+bool SAM2Client::isAuthenticatedProtocol(const QNetworkReply *reply) {
+  return reply && reply->rawHeader(kProtocolHeader) == kProtocolVersion;
+}
+
 SAM2Client::SAM2Client(QObject *parent)
     : QObject(parent), m_networkManager(new QNetworkAccessManager(this)),
-      m_serviceUrl("http://localhost:5001") // Changed from 5000 to 5001
+      m_serviceUrl("http://127.0.0.1:5001")
 {
+  if (g_authToken.isEmpty()) {
+    const QByteArray environmentToken =
+        qEnvironmentVariable("DRAWINGSTUDIO_SAM2_TOKEN").trimmed().toUtf8();
+    if (environmentToken.size() >= kMinAuthTokenBytes)
+      g_authToken = environmentToken;
+  }
+
   // Ensure custom signal payloads work in queued connections / tests.
   qRegisterMetaType<SAM2Client::SegmentationResult>(
       "SAM2Client::SegmentationResult");
@@ -84,9 +113,27 @@ SAM2Client::SAM2Client(QObject *parent)
       "SAM2Client::MultiSegmentationResult");
 }
 
+void SAM2Client::setServiceUrl(const QString &urlString) {
+  QUrl url(urlString);
+  const QHostAddress address(url.host());
+  const bool isLoopback = url.host().compare(QStringLiteral("localhost"),
+                                              Qt::CaseInsensitive) == 0
+      || address.isLoopback();
+  if (!url.isValid() || url.scheme() != QStringLiteral("http") || !isLoopback) {
+    qWarning() << "SAM2: Refusing non-loopback service URL" << urlString;
+    return;
+  }
+
+  QString normalized = url.toString(QUrl::RemoveFragment | QUrl::RemoveQuery);
+  while (normalized.endsWith('/'))
+    normalized.chop(1);
+  m_serviceUrl = normalized;
+}
+
 void SAM2Client::checkHealth() {
   QUrl url(m_serviceUrl + "/health");
   QNetworkRequest request(url);
+  authorizeRequest(request);
 
   QNetworkReply *reply = m_networkManager->get(request);
   attachTimeout(reply, kHealthTimeoutMs, "Health check");
@@ -100,6 +147,12 @@ void SAM2Client::checkHealth() {
     }
 
     if (reply->error() == QNetworkReply::NoError) {
+      if (!isAuthenticatedProtocol(reply)) {
+        emit healthCheckComplete(
+            false, QStringLiteral("SAM2 service is not using the authenticated protocol"));
+        reply->deleteLater();
+        return;
+      }
       QByteArray response = reply->readAll();
       QJsonObject obj;
       QString parseError;
@@ -113,6 +166,14 @@ void SAM2Client::checkHealth() {
 
       bool available = obj["sam2_loaded"].toBool(false);
       QString device = obj["device"].toString("unknown");
+
+      if (!obj["auth_required"].toBool(false) ||
+          obj["protocol_version"].toString() != QString::fromLatin1(kProtocolVersion)) {
+        emit healthCheckComplete(
+            false, QStringLiteral("SAM2 service authentication contract is invalid"));
+        reply->deleteLater();
+        return;
+      }
 
       emit healthCheckComplete(available, device);
     } else {
@@ -129,6 +190,7 @@ void SAM2Client::segmentImage(const QImage &image) {
 
   QNetworkRequest request(QUrl(m_serviceUrl + "/segment_all"));
   request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+  authorizeRequest(request);
 
   QJsonObject json;
   json["image"] = QString::fromUtf8(imageToBase64(image));
@@ -146,12 +208,14 @@ void SAM2Client::segmentImage(const QImage &image) {
   connect(progressTimer, &QTimer::timeout, this, [this]() {
     // Poll progress endpoint
     QNetworkRequest progressRequest(QUrl(m_serviceUrl + "/progress"));
+    authorizeRequest(progressRequest);
     QNetworkReply *progressReply = m_networkManager->get(progressRequest);
     attachTimeout(progressReply, kProgressTimeoutMs, "Progress");
 
     connect(progressReply, &QNetworkReply::finished, this,
             [this, progressReply]() {
-              if (progressReply->error() == QNetworkReply::NoError) {
+              if (progressReply->error() == QNetworkReply::NoError &&
+                  isAuthenticatedProtocol(progressReply)) {
                 QJsonObject obj;
                 QString parseError;
                 if (parseJsonObject(progressReply->readAll(), obj, parseError)) {
@@ -184,6 +248,7 @@ void SAM2Client::segmentHumans(const QImage &image) {
 
   QNetworkRequest request((QUrl(urlStr)));
   request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+  authorizeRequest(request);
 
   QJsonObject json;
   QString base64Image = QString::fromUtf8(imageToBase64(image));
@@ -226,6 +291,7 @@ void SAM2Client::segmentWithPoint(const QImage &image, const QPointF &point) {
   QUrl url(m_serviceUrl + "/segment_point");
   QNetworkRequest request(url);
   request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+  authorizeRequest(request);
 
   QNetworkReply *reply = m_networkManager->post(request, data);
   attachTimeout(reply, kSegmentationTimeoutMs, "Point segmentation");
@@ -250,6 +316,7 @@ void SAM2Client::segmentWithBox(const QImage &image, const QRectF &box) {
   QUrl url(m_serviceUrl + "/segment_box");
   QNetworkRequest request(url);
   request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+  authorizeRequest(request);
 
   QNetworkReply *reply = m_networkManager->post(request, data);
   attachTimeout(reply, kSegmentationTimeoutMs, "Box segmentation");
@@ -262,6 +329,14 @@ void SAM2Client::handleAllObjectsResponse(QNetworkReply *reply) {
   const QString timeoutMsg = timeoutErrorMessage(reply);
   if (!timeoutMsg.isEmpty()) {
     emit segmentationFailed(timeoutMsg);
+    reply->deleteLater();
+    return;
+  }
+
+  if (reply->error() == QNetworkReply::NoError &&
+      !isAuthenticatedProtocol(reply)) {
+    emit segmentationFailed(
+        QStringLiteral("SAM2 service is not using the authenticated protocol"));
     reply->deleteLater();
     return;
   }
@@ -389,6 +464,14 @@ void SAM2Client::handleSegmentationResponse(QNetworkReply *reply) {
   const QString timeoutMsg = timeoutErrorMessage(reply);
   if (!timeoutMsg.isEmpty()) {
     emit segmentationFailed(timeoutMsg);
+    reply->deleteLater();
+    return;
+  }
+
+  if (reply->error() == QNetworkReply::NoError &&
+      !isAuthenticatedProtocol(reply)) {
+    emit segmentationFailed(
+        QStringLiteral("SAM2 service is not using the authenticated protocol"));
     reply->deleteLater();
     return;
   }

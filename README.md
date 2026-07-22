@@ -140,6 +140,61 @@ make             # Single-threaded
 ./DrawingStudio
 ```
 
+### Authenticated automation API
+
+The localhost automation server is disabled by default. Enable it for a trusted
+session with a strong bearer token:
+
+```bash
+DRAWINGSTUDIO_AUTOMATION_TOKEN='<at-least-16-random-bytes>' \
+  ./DrawingStudio --enable-automation
+
+curl -H "Authorization: Bearer $DRAWINGSTUDIO_AUTOMATION_TOKEN" \
+  http://127.0.0.1:19100/api/status
+```
+
+`GET /api/commands` returns catalog version 2. Each action declares
+`requiredParams`, `optionalParams`, and whether it needs filesystem access;
+`params` remains the backward-compatible union of both parameter lists. Unknown
+actions and commands missing required parameters are rejected before dispatch.
+
+Opening, importing, saving, and exporting through automation are blocked unless
+the app is also launched with `--automation-allow-filesystem`. The server binds
+only to `127.0.0.1`, does not enable browser CORS, and enforces bounded requests.
+The environment variable is preferred over `--automation-token`, because command-line
+arguments can be visible to other local processes.
+
+### Local SAM2 service security
+
+DrawingStudio launches the optional SAM2 helper on `127.0.0.1:5001` with a random
+per-session bearer token. Every health, progress, and segmentation request is
+authenticated, and responses from older unauthenticated services are rejected.
+The helper does not enable browser CORS and rejects request bodies larger than
+64 MiB.
+
+For an externally managed helper, give both processes the same strong token:
+
+```bash
+export DRAWINGSTUDIO_SAM2_TOKEN='<at-least-16-random-bytes>'
+sam2_service/venv/bin/python3 sam2_service/sam2_service.py
+./build/DrawingStudio
+```
+
+### AI provider connection tests
+
+**Test Connection** uses the values currently shown in the AI settings dialog
+without saving those draft API keys or endpoints. Only **Save** persists the
+form. Remote Stable Diffusion defaults to `http://127.0.0.1:8000`; probes accept
+only HTTP(S) URLs, refuse redirects, and time out after 15 seconds.
+
+### Project persistence and recovery
+
+Project saves and two-minute recovery snapshots use atomic replacement, so a
+failed or interrupted write does not truncate the previous file. Incoming
+projects are fully validated and parsed before the current document is replaced.
+After restoring a crash snapshot, DrawingStudio keeps that snapshot until the
+project is explicitly saved or the application closes cleanly.
+
 ### Windows (Visual Studio):
 ```cmd
 mkdir build

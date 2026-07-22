@@ -1,3 +1,4 @@
+#include "AutomationCommandCatalog.h"
 #include "CommandManager.h"
 #include "Commands.h"
 #include "DrawingCanvas.h"
@@ -24,6 +25,7 @@ private slots:
     void drawLineAddsPrimitive();
     void unknownActionSetsErrorResult();
     void undoHostCallbackInvoked();
+    void everyCatalogActionHasDispatcherHandler();
 
 private:
     void wireCommandExecution();
@@ -113,6 +115,20 @@ void tst_DrawingCommandDispatcher::undoHostCallbackInvoked()
 {
     m_dispatcher->execute(QStringLiteral("undo"), {});
     QCOMPARE(m_undoCalls, 1);
+}
+
+void tst_DrawingCommandDispatcher::everyCatalogActionHasDispatcherHandler()
+{
+    for (const QJsonValue &value : AutomationCommandCatalog::commands()) {
+        const QString action =
+            value.toObject().value(QStringLiteral("action")).toString();
+        m_dispatcher->clearLastResult();
+        m_dispatcher->execute(action, {});
+        const QString error =
+            m_dispatcher->lastResult().value(QStringLiteral("error")).toString();
+        QVERIFY2(!error.startsWith(QStringLiteral("Catalog mismatch")),
+                 qPrintable(action + QStringLiteral(": ") + error));
+    }
 }
 
 QTEST_MAIN(tst_DrawingCommandDispatcher)

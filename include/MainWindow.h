@@ -76,7 +76,15 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    MainWindow(QWidget *parent = nullptr);
+    struct AutomationOptions {
+        bool enabled = false;
+        quint16 port = 19100;
+        QString token;
+        bool allowFilesystemCommands = false;
+    };
+
+    explicit MainWindow(QWidget *parent = nullptr);
+    MainWindow(const AutomationOptions &automation, QWidget *parent);
     ~MainWindow();
     
     // Undo/Redo support
@@ -324,7 +332,7 @@ private:
     // SD Backend selection
     enum class SDBackend {
         Local,      // Local ggml-based SD
-        Remote      // Remote server (192.168.1.58)
+        Remote      // User-configured HTTP Stable Diffusion server
     };
     SDBackend m_currentSDBackend = SDBackend::Local;
     bool m_modelsLoading = false;

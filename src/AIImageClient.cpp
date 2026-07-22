@@ -20,6 +20,27 @@
 
 // AIImageClient core + routing (refactor E28).
 
+namespace {
+constexpr int kConnectionTestTimeoutMs = 15000;
+
+QString connectionReplyError(const QNetworkReply *reply)
+{
+    if (!reply)
+        return QStringLiteral("No network response");
+    const QUrl redirect =
+        reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
+    if (redirect.isValid())
+        return QStringLiteral("Redirect refused");
+    if (reply->error() != QNetworkReply::NoError)
+        return reply->errorString();
+    const int status =
+        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status < 200 || status >= 300)
+        return QStringLiteral("HTTP %1").arg(status);
+    return {};
+}
+}
+
 // --- AIImageClient ---
 AIImageClient::AIImageClient(QObject *parent)
     : QObject(parent)
@@ -277,12 +298,37 @@ void AIImageClient::testConnection(const QString &providerIn)
             : providerIn;
     QSettings s;
 
+    ConnectionTestConfig config;
     if (provider == QLatin1String("nanobanana")) {
-        const QString apiKey =
+        config.apiKey =
             s.value(QStringLiteral("AI/nanoBananaApiKey"),
                     s.value(QStringLiteral("AI/googleApiKey")).toString())
-                .toString()
-                .trimmed();
+                .toString();
+    } else if (provider == QLatin1String("openai")) {
+        config.apiKey =
+            s.value(QStringLiteral("AI/openaiApiKey"),
+                    s.value(QStringLiteral("AI/apiKey")).toString())
+                .toString();
+    } else if (provider == QLatin1String("stability")) {
+        config.apiKey = s.value(QStringLiteral("AI/stabilityApiKey")).toString();
+    } else if (provider == QLatin1String("higgsfield")) {
+        config.higgsfieldCliPath =
+            s.value(QStringLiteral("AI/higgsfieldCliPath"), QStringLiteral("higgsfield"))
+                .toString();
+    } else if (provider == QLatin1String("remotesd")) {
+        config.remoteSdUrl =
+            s.value(QStringLiteral("AI/remoteSDUrl"), defaultRemoteSdUrl()).toString();
+    }
+
+    testConnection(provider, config);
+}
+
+void AIImageClient::testConnection(const QString &provider,
+                                   const ConnectionTestConfig &config)
+{
+    const QString apiKey = config.apiKey.trimmed();
+
+    if (provider == QLatin1String("nanobanana")) {
         if (apiKey.isEmpty()) {
             emit connectionTestFinished(
                 false, QStringLiteral("Missing Google API key (AI Settings)"));
@@ -291,12 +337,16 @@ void AIImageClient::testConnection(const QString &providerIn)
         QNetworkRequest request(QUrl(
             QStringLiteral("https://generativelanguage.googleapis.com/v1beta/models")));
         request.setRawHeader("x-goog-api-key", apiKey.toUtf8());
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                             QNetworkRequest::ManualRedirectPolicy);
         QNetworkReply *reply = m_nam->get(request);
+        watchReply(reply, kConnectionTestTimeoutMs);
         connect(reply, &QNetworkReply::finished, this, [this, reply]() {
             reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
+            const QString error = connectionReplyError(reply);
+            if (!error.isEmpty()) {
                 emit connectionTestFinished(
-                    false, QStringLiteral("Nano Banana: %1").arg(reply->errorString()));
+                    false, QStringLiteral("Nano Banana: %1").arg(error));
                 return;
             }
             const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
@@ -308,11 +358,6 @@ void AIImageClient::testConnection(const QString &providerIn)
     }
 
     if (provider == QLatin1String("openai")) {
-        const QString apiKey =
-            s.value(QStringLiteral("AI/openaiApiKey"),
-                    s.value(QStringLiteral("AI/apiKey")).toString())
-                .toString()
-                .trimmed();
         if (apiKey.isEmpty()) {
             emit connectionTestFinished(false, QStringLiteral("Missing OpenAI API key"));
             return;
@@ -320,12 +365,16 @@ void AIImageClient::testConnection(const QString &providerIn)
         QNetworkRequest request(QUrl(QStringLiteral("https://api.openai.com/v1/models")));
         request.setRawHeader("Authorization",
                              QStringLiteral("Bearer %1").arg(apiKey).toUtf8());
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                             QNetworkRequest::ManualRedirectPolicy);
         QNetworkReply *reply = m_nam->get(request);
+        watchReply(reply, kConnectionTestTimeoutMs);
         connect(reply, &QNetworkReply::finished, this, [this, reply]() {
             reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
+            const QString error = connectionReplyError(reply);
+            if (!error.isEmpty()) {
                 emit connectionTestFinished(
-                    false, QStringLiteral("OpenAI: %1").arg(reply->errorString()));
+                    false, QStringLiteral("OpenAI: %1").arg(error));
                 return;
             }
             emit connectionTestFinished(true, QStringLiteral("OpenAI connection OK"));
@@ -334,8 +383,6 @@ void AIImageClient::testConnection(const QString &providerIn)
     }
 
     if (provider == QLatin1String("stability")) {
-        const QString apiKey =
-            s.value(QStringLiteral("AI/stabilityApiKey")).toString().trimmed();
         if (apiKey.isEmpty()) {
             emit connectionTestFinished(false,
                                         QStringLiteral("Missing Stability API key"));
@@ -345,12 +392,16 @@ void AIImageClient::testConnection(const QString &providerIn)
             QUrl(QStringLiteral("https://api.stability.ai/v1/user/account")));
         request.setRawHeader("Authorization",
                              QStringLiteral("Bearer %1").arg(apiKey).toUtf8());
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                             QNetworkRequest::ManualRedirectPolicy);
         QNetworkReply *reply = m_nam->get(request);
+        watchReply(reply, kConnectionTestTimeoutMs);
         connect(reply, &QNetworkReply::finished, this, [this, reply]() {
             reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
+            const QString error = connectionReplyError(reply);
+            if (!error.isEmpty()) {
                 emit connectionTestFinished(
-                    false, QStringLiteral("Stability: %1").arg(reply->errorString()));
+                    false, QStringLiteral("Stability: %1").arg(error));
                 return;
             }
             emit connectionTestFinished(true, QStringLiteral("Stability connection OK"));
@@ -359,9 +410,9 @@ void AIImageClient::testConnection(const QString &providerIn)
     }
 
     if (provider == QLatin1String("higgsfield")) {
-        const QString cli =
-            s.value(QStringLiteral("AI/higgsfieldCliPath"), QStringLiteral("higgsfield"))
-                .toString();
+        const QString cli = config.higgsfieldCliPath.trimmed().isEmpty()
+            ? QStringLiteral("higgsfield")
+            : config.higgsfieldCliPath.trimmed();
         auto *proc = new QProcess(this);
         proc->setProcessChannelMode(QProcess::MergedChannels);
         connect(proc,
@@ -384,25 +435,41 @@ void AIImageClient::testConnection(const QString &providerIn)
             proc->deleteLater();
             emit connectionTestFinished(
                 false, QStringLiteral("Could not start higgsfield CLI"));
+        } else {
+            QTimer::singleShot(5000, proc, [proc]() {
+                if (proc->state() != QProcess::NotRunning)
+                    proc->kill();
+            });
         }
         return;
     }
 
     if (provider == QLatin1String("remotesd")) {
-        QString base = s.value(QStringLiteral("AI/remoteSDUrl"),
-                               QStringLiteral("http://127.0.0.1:8000"))
-                           .toString()
-                           .trimmed();
+        QString base = config.remoteSdUrl.trimmed();
+        if (base.isEmpty())
+            base = defaultRemoteSdUrl();
         if (base.endsWith(QLatin1Char('/')))
             base.chop(1);
-        QNetworkRequest request(QUrl(base + QStringLiteral("/")));
+        const QUrl url(base + QStringLiteral("/"));
+        if (!url.isValid() || url.host().isEmpty()
+            || (url.scheme() != QLatin1String("http")
+                && url.scheme() != QLatin1String("https"))) {
+            emit connectionTestFinished(
+                false, QStringLiteral("Remote SD URL must be a valid HTTP(S) URL"));
+            return;
+        }
+        QNetworkRequest request(url);
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                             QNetworkRequest::ManualRedirectPolicy);
         QNetworkReply *reply = m_nam->get(request);
+        watchReply(reply, kConnectionTestTimeoutMs);
         connect(reply, &QNetworkReply::finished, this, [this, reply, base]() {
             reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
+            const QString error = connectionReplyError(reply);
+            if (!error.isEmpty()) {
                 emit connectionTestFinished(
                     false, QStringLiteral("Remote SD unreachable: %1")
-                               .arg(reply->errorString()));
+                               .arg(error));
                 return;
             }
             emit connectionTestFinished(
@@ -415,3 +482,7 @@ void AIImageClient::testConnection(const QString &providerIn)
                                 QStringLiteral("Unknown provider: %1").arg(provider));
 }
 
+QString AIImageClient::defaultRemoteSdUrl()
+{
+    return QStringLiteral("http://127.0.0.1:8000");
+}

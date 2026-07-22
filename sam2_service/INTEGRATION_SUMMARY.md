@@ -133,14 +133,17 @@ python test_human_detection.py /path/to/image.jpg
 ```python
 import requests
 import base64
+import os
+
+headers = {'Authorization': f"Bearer {os.environ['DRAWINGSTUDIO_SAM2_TOKEN']}"}
 
 # Load image
 with open('photo.jpg', 'rb') as f:
     image_b64 = base64.b64encode(f.read()).decode('utf-8')
 
 # Detect largest human
-response = requests.post('http://localhost:5001/segment_largest_human', 
-    json={'image': image_b64, 'confidence': 0.5})
+response = requests.post('http://127.0.0.1:5001/segment_largest_human',
+    headers=headers, json={'image': image_b64, 'confidence': 0.5})
 
 result = response.json()
 if result['success']:
@@ -151,14 +154,15 @@ if result['success']:
 ### cURL
 ```bash
 IMAGE_B64=$(base64 -i photo.jpg)
-curl -X POST http://localhost:5001/segment_humans \
+curl -X POST http://127.0.0.1:5001/segment_humans \
+  -H "Authorization: Bearer $DRAWINGSTUDIO_SAM2_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"image\": \"$IMAGE_B64\", \"confidence\": 0.5}"
 ```
 
 ## Service Status
 
-The service is currently running on `http://localhost:5001` with the following endpoints:
+The authenticated service listens on `http://127.0.0.1:5001` with the following endpoints:
 
 ```
 GET  /health                  - Health check
@@ -175,7 +179,8 @@ POST /segment_largest_human   - 🧑 Detect LARGEST human (NEW)
 ### Quick Test
 ```bash
 # Make sure service is running
-curl http://localhost:5001/health
+curl -H "Authorization: Bearer $DRAWINGSTUDIO_SAM2_TOKEN" \
+  http://127.0.0.1:5001/health
 
 # Test with an image
 python test_human_detection.py /path/to/photo.jpg
@@ -229,8 +234,9 @@ self.yolo = YOLO('yolov8m.pt')  # medium, ~52MB
 The new endpoints can be called from your Qt/C++ application using QNetworkAccessManager:
 
 ```cpp
-QNetworkRequest request(QUrl("http://localhost:5001/segment_largest_human"));
+QNetworkRequest request(QUrl("http://127.0.0.1:5001/segment_largest_human"));
 request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+request.setRawHeader("Authorization", "Bearer " + sam2Token);
 
 QJsonObject json;
 json["image"] = imageToBase64(image);
@@ -295,4 +301,4 @@ For issues or questions:
 
 **Status:** ✅ Integration complete and tested  
 **Date:** October 16, 2025  
-**Service:** Running on http://localhost:5001
+**Service:** Authenticated on http://127.0.0.1:5001

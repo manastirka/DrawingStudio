@@ -33,7 +33,7 @@ private slots:
 private:
     void loadSettings();
     void updateVisibility();
-    /** Flush current form fields into QSettings so AIImageClient can read them. */
+    /** Persist the current form fields after the user chooses Save. */
     void writeFormToSettings() const;
 
     QComboBox *m_providerCombo = nullptr;

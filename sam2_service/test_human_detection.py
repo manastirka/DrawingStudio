@@ -6,9 +6,14 @@ import requests
 import base64
 import json
 import sys
+import os
 from PIL import Image
 import io
 import numpy as np
+
+
+TOKEN = os.environ.get('DRAWINGSTUDIO_SAM2_TOKEN', '').strip()
+AUTH_HEADERS = {'Authorization': f'Bearer {TOKEN}'}
 
 
 def test_human_detection(image_path, endpoint='segment_largest_human'):
@@ -22,7 +27,7 @@ def test_human_detection(image_path, endpoint='segment_largest_human'):
     image_b64 = base64.b64encode(image_data).decode('utf-8')
     
     # Send request
-    url = f'http://localhost:5001/{endpoint}'
+    url = f'http://127.0.0.1:5001/{endpoint}'
     print(f"Sending request to {url}...")
     
     payload = {
@@ -30,7 +35,7 @@ def test_human_detection(image_path, endpoint='segment_largest_human'):
         'confidence': 0.5
     }
     
-    response = requests.post(url, json=payload)
+    response = requests.post(url, json=payload, headers=AUTH_HEADERS)
     
     if response.status_code != 200:
         print(f"Error: {response.status_code}")
@@ -78,7 +83,7 @@ def test_human_detection(image_path, endpoint='segment_largest_human'):
 def check_service():
     """Check if service is running"""
     try:
-        response = requests.get('http://localhost:5001/health')
+        response = requests.get('http://127.0.0.1:5001/health', headers=AUTH_HEADERS)
         if response.status_code == 200:
             health = response.json()
             print("✓ Service is running")
@@ -99,6 +104,10 @@ if __name__ == '__main__':
     print("YOLO + SAM2 Human Detection Test")
     print("="*60)
     print()
+
+    if len(TOKEN.encode('utf-8')) < 16:
+        print("Set DRAWINGSTUDIO_SAM2_TOKEN to the service's strong bearer token.")
+        sys.exit(2)
     
     # Check service
     if not check_service():

@@ -7,6 +7,7 @@
 #include <QJsonArray>
 #include <QByteArray>
 #include <QMap>
+#include <QString>
 #include <QWidget>
 
 #include <functional>
@@ -25,6 +26,12 @@ public:
     void stop();
     bool isRunning() const;
 
+    /** Required bearer token. The server refuses to start without one. */
+    void setAuthToken(const QString &token) { m_authToken = token.trimmed().toUtf8(); }
+
+    /** Filesystem I/O commands are denied unless explicitly enabled by the host. */
+    void setFilesystemCommandsAllowed(bool allowed) { m_allowFilesystemCommands = allowed; }
+
     void setCanvas(DrawingCanvas *canvas) { m_canvas = canvas; }
 
     /** Window used for full-window screenshots (typically MainWindow). */
@@ -41,6 +48,13 @@ public:
 
     /** Hard cap for POST /api/batch command array length. */
     static constexpr int kMaxBatchCommands = 100;
+
+    /** Limits for the deliberately small local HTTP control surface. */
+    static constexpr qsizetype kMaxHeaderBytes = 16 * 1024;
+    static constexpr qsizetype kMaxBodyBytes = 1024 * 1024;
+    static constexpr qsizetype kMinAuthTokenBytes = 16;
+    static constexpr int kMaxConnections = 16;
+    static constexpr int kConnectionTimeoutMs = 5000;
 
 signals:
     void commandReceived(const QString &action, const QJsonObject &params);
@@ -71,10 +85,15 @@ private:
     void sendErrorResponse(QTcpSocket *socket, int statusCode, const QString &message);
 
     QJsonObject lastCommandResult() const;
+    bool isAuthorized(const QMap<QString, QString> &headers) const;
+    static bool isFilesystemAction(const QString &action);
+    static bool constantTimeEquals(const QByteArray &left, const QByteArray &right);
 
     QTcpServer *m_server = nullptr;
     DrawingCanvas *m_canvas = nullptr;
     QWidget *m_windowWidget = nullptr;
     std::function<QJsonObject()> m_resultProvider;
     QMap<QTcpSocket*, QByteArray> m_buffers;
+    QByteArray m_authToken;
+    bool m_allowFilesystemCommands = false;
 };

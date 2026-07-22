@@ -32,6 +32,13 @@ public:
         bool replaceSelected = false;
     };
 
+    /** Draft credentials/endpoints used by a connection probe without persistence. */
+    struct ConnectionTestConfig {
+        QString apiKey;
+        QString remoteSdUrl;
+        QString higgsfieldCliPath;
+    };
+
     explicit AIImageClient(QObject *parent = nullptr);
     ~AIImageClient() override;
 
@@ -41,6 +48,9 @@ public:
     virtual void generate(const Request &request);
     virtual void edit(const Request &request);
     void testConnection(const QString &provider);
+    void testConnection(const QString &provider, const ConnectionTestConfig &config);
+
+    static QString defaultRemoteSdUrl();
 
 signals:
     void started(const QString &message);

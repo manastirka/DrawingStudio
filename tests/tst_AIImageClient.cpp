@@ -1,9 +1,14 @@
 #include "AIImageClient.h"
+#include "AISettingsDialog.h"
 
 #include <QCoreApplication>
+#include <QLineEdit>
+#include <QPushButton>
 #include <QImage>
 #include <QSettings>
 #include <QSignalSpy>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <QTimer>
 #include <QtTest>
 
@@ -61,6 +66,9 @@ private slots:
     void testConnection_missingOpenAIKey();
     void testConnection_missingNanoBananaKey();
     void testConnection_unknownProvider();
+    void testConnection_invalidRemoteSdUrl();
+    void testConnection_refusesRemoteSdRedirect();
+    void connectionTestDraftDoesNotPersist();
 };
 
 void tst_AIImageClient::realClient_emptyPrompt_fails()
@@ -191,6 +199,93 @@ void tst_AIImageClient::testConnection_unknownProvider()
     QVERIFY(spy.at(0).at(1).toString().contains(QStringLiteral("Unknown"), Qt::CaseInsensitive));
 }
 
+void tst_AIImageClient::testConnection_invalidRemoteSdUrl()
+{
+    AIImageClient client;
+    QSignalSpy spy(&client, &AIImageClient::connectionTestFinished);
+    AIImageClient::ConnectionTestConfig config;
+    config.remoteSdUrl = QStringLiteral("file:///tmp/not-a-server");
+
+    client.testConnection(QStringLiteral("remotesd"), config);
+
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toBool(), false);
+    QVERIFY(spy.at(0).at(1).toString().contains(QStringLiteral("HTTP")));
+    QCOMPARE(AIImageClient::defaultRemoteSdUrl(),
+             QStringLiteral("http://127.0.0.1:8000"));
+}
+
+void tst_AIImageClient::testConnection_refusesRemoteSdRedirect()
+{
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    connect(&server, &QTcpServer::newConnection, &server, [&server]() {
+        QTcpSocket *socket = server.nextPendingConnection();
+        QVERIFY(socket);
+        connect(socket, &QTcpSocket::readyRead, socket, [socket]() {
+            socket->readAll();
+            socket->write(
+                "HTTP/1.1 302 Found\r\n"
+                "Location: http://127.0.0.1:9/redirected\r\n"
+                "Content-Length: 0\r\nConnection: close\r\n\r\n");
+            socket->disconnectFromHost();
+        });
+    });
+
+    AIImageClient client;
+    QSignalSpy spy(&client, &AIImageClient::connectionTestFinished);
+    AIImageClient::ConnectionTestConfig config;
+    config.remoteSdUrl =
+        QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort());
+
+    client.testConnection(QStringLiteral("remotesd"), config);
+
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 2000);
+    QCOMPARE(spy.at(0).at(0).toBool(), false);
+    QVERIFY(spy.at(0).at(1).toString().contains(QStringLiteral("Redirect")));
+}
+
+void tst_AIImageClient::connectionTestDraftDoesNotPersist()
+{
+    QSettings settings;
+    const QString providerKey = QStringLiteral("AI/provider");
+    const QString apiKey = QStringLiteral("AI/openaiApiKey");
+    const bool hadProvider = settings.contains(providerKey);
+    const bool hadApiKey = settings.contains(apiKey);
+    const QVariant previousProvider = settings.value(providerKey);
+    const QVariant previousApiKey = settings.value(apiKey);
+
+    settings.setValue(providerKey, QStringLiteral("openai"));
+    settings.setValue(apiKey, QStringLiteral("persisted-test-key"));
+    settings.sync();
+
+    {
+        AISettingsDialog dialog;
+        auto *keyEdit = dialog.findChild<QLineEdit *>(
+            QStringLiteral("openaiApiKeyEdit"));
+        auto *testButton = dialog.findChild<QPushButton *>(
+            QStringLiteral("testAiConnectionButton"));
+        QVERIFY(keyEdit);
+        QVERIFY(testButton);
+
+        keyEdit->clear();
+        QTest::mouseClick(testButton, Qt::LeftButton);
+
+        QCOMPARE(settings.value(apiKey).toString(),
+                 QStringLiteral("persisted-test-key"));
+        QVERIFY(testButton->isEnabled());
+    }
+
+    if (hadProvider)
+        settings.setValue(providerKey, previousProvider);
+    else
+        settings.remove(providerKey);
+    if (hadApiKey)
+        settings.setValue(apiKey, previousApiKey);
+    else
+        settings.remove(apiKey);
+    settings.sync();
+}
+
 QTEST_MAIN(tst_AIImageClient)
 #include "tst_AIImageClient.moc"
-

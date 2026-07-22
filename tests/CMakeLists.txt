@@ -299,11 +299,13 @@ add_executable(tst_AIImageClient
     ../src/AIImageClient.cpp
     ../src/AIImageClientNanoBanana.cpp
     ../src/AIImageClientProviders.cpp
+    ../src/AISettingsDialog.cpp
     ../include/AIImageClient.h
+    ../include/AISettingsDialog.h
 )
 target_include_directories(tst_AIImageClient PRIVATE ../include)
 target_link_libraries(tst_AIImageClient PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Network Qt6::Test)
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Test)
 add_test(NAME tst_AIImageClient COMMAND tst_AIImageClient)
 set_tests_properties(tst_AIImageClient PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
@@ -493,6 +495,7 @@ set(TEST_CANVAS_BUNDLE
 )
 
 set(TEST_DISPATCHER_SOURCES
+    ../src/AutomationCommandCatalog.cpp
     ../src/DrawingCommandDispatcher.cpp
     ../src/DrawingCommandDispatcherDraw.cpp
     ../src/DrawingCommandDispatcherEdit.cpp
@@ -535,7 +538,9 @@ add_test(NAME tst_LayerManager COMMAND tst_LayerManager)
 add_executable(tst_CommandServer
     tst_CommandServer.cpp
     ../src/CommandServer.cpp
+    ../src/AutomationCommandCatalog.cpp
     ../include/CommandServer.h
+    ../include/AutomationCommandCatalog.h
 )
 target_include_directories(tst_CommandServer PRIVATE ../include)
 target_link_libraries(tst_CommandServer PRIVATE
@@ -618,4 +623,3 @@ target_link_libraries(tst_AIWorkflowController PRIVATE
 add_test(NAME tst_AIWorkflowController COMMAND tst_AIWorkflowController)
 set_tests_properties(tst_AIWorkflowController PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
-

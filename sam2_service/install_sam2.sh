@@ -15,7 +15,7 @@ fi
 
 echo ""
 echo "Step 1: Installing Python dependencies..."
-pip3 install flask flask-cors torch torchvision opencv-python pillow numpy
+pip3 install flask torch torchvision opencv-python pillow numpy
 
 echo ""
 echo "Step 2: Cloning SAM2 repository..."
@@ -57,7 +57,8 @@ echo "=========================================="
 echo ""
 echo "To start the service:"
 echo "  cd sam2_service"
+echo "  export DRAWINGSTUDIO_SAM2_TOKEN='<at-least-16-random-bytes>'"
 echo "  python3 sam2_service.py"
 echo ""
-echo "The service will run on http://localhost:5000"
+echo "The authenticated service will run on http://127.0.0.1:5001"
 echo "=========================================="

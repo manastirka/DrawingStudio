@@ -1,19 +1,19 @@
 #!/bin/bash
 
 # Remote SD Server Connection Test Script
-# Tests connectivity to your Stable Diffusion server at 192.168.1.58:7860
+# Override DRAWINGSTUDIO_REMOTE_SD_HOST/PORT for a server on another machine.
 
 echo "🔍 Testing Remote SD Server Connection..."
 echo "=========================================="
 echo ""
 
-SERVER_IP="192.168.1.58"
-SERVER_PORT="8000"
+SERVER_IP="${DRAWINGSTUDIO_REMOTE_SD_HOST:-127.0.0.1}"
+SERVER_PORT="${DRAWINGSTUDIO_REMOTE_SD_PORT:-8000}"
 SERVER_URL="http://${SERVER_IP}:${SERVER_PORT}"
 
 # Test 1: Ping server
 echo "Test 1: Ping server..."
-if ping -c 3 -W 2 $SERVER_IP > /dev/null 2>&1; then
+if ping -c 3 -W 2 "$SERVER_IP" > /dev/null 2>&1; then
     echo "✅ Server is reachable via ping"
 else
     echo "❌ Server is NOT reachable via ping"
@@ -25,7 +25,7 @@ echo ""
 
 # Test 2: Check if port is open
 echo "Test 2: Check if port $SERVER_PORT is open..."
-if nc -z -w 2 $SERVER_IP $SERVER_PORT 2>/dev/null; then
+if nc -z -w 2 "$SERVER_IP" "$SERVER_PORT" 2>/dev/null; then
     echo "✅ Port $SERVER_PORT is open"
 else
     echo "❌ Port $SERVER_PORT is NOT open"
@@ -61,7 +61,7 @@ if [ -n "$API_RESPONSE" ]; then
         MODEL_COUNT=$(echo "$API_RESPONSE" | jq '. | length' 2>/dev/null)
         echo "   Found $MODEL_COUNT model(s)"
         
-        echo "$API_RESPONSE" | jq -r '.[].model_name' 2>/dev/null | while read model; do
+        echo "$API_RESPONSE" | jq -r '.[].model_name' 2>/dev/null | while read -r model; do
             echo "   📦 $model"
         done
     else
@@ -83,7 +83,7 @@ if echo "$API_RESPONSE" | jq -e '.[] | select(.model_name | contains("3.5"))' > 
 else
     echo "⚠️  SD 3.5 Large model not found"
     echo "   Available models:"
-    echo "$API_RESPONSE" | jq -r '.[].model_name' 2>/dev/null | while read model; do
+    echo "$API_RESPONSE" | jq -r '.[].model_name' 2>/dev/null | while read -r model; do
         echo "   • $model"
     done
 fi

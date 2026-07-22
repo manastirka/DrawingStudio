@@ -1,4 +1,5 @@
 #include "SAM2ServiceManager.h"
+#include "SAM2Client.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -7,12 +8,31 @@
 #include <QJsonObject>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QProcessEnvironment>
 #include <QDebug>
 #include <QUrl>
+#include <QUuid>
+
+namespace {
+constexpr const char *kSam2TokenEnvironment = "DRAWINGSTUDIO_SAM2_TOKEN";
+constexpr const char *kProtocolHeader = "X-DrawingStudio-SAM2-Protocol";
+constexpr const char *kProtocolVersion = "2";
+}
 
 SAM2ServiceManager::SAM2ServiceManager(QObject *parent)
     : QObject(parent)
 {
+    m_authToken = qEnvironmentVariable(kSam2TokenEnvironment).trimmed().toUtf8();
+    if (!m_authToken.isEmpty()
+        && m_authToken.size() < SAM2Client::kMinAuthTokenBytes) {
+        qWarning() << "SAM2ServiceManager: Ignoring weak DRAWINGSTUDIO_SAM2_TOKEN";
+        m_authToken.clear();
+    }
+    if (m_authToken.isEmpty()) {
+        m_authToken = QUuid::createUuid().toString(QUuid::WithoutBraces).toUtf8();
+    }
+    SAM2Client::setDefaultAuthToken(m_authToken);
+
     m_nam = new QNetworkAccessManager(this);
     m_pollTimer = new QTimer(this);
     m_pollTimer->setInterval(5000);
@@ -93,6 +113,10 @@ void SAM2ServiceManager::launchIfNeeded()
 
     m_process->setWorkingDirectory(serviceDir());
     m_process->setProcessChannelMode(QProcess::MergedChannels);
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QString::fromLatin1(kSam2TokenEnvironment),
+                       QString::fromUtf8(m_authToken));
+    m_process->setProcessEnvironment(environment);
     qDebug() << "SAM2ServiceManager: launching" << python << script
              << "cwd" << serviceDir();
     m_process->start(python, {script});
@@ -152,6 +176,10 @@ void SAM2ServiceManager::pollHealth()
     m_healthInFlight = true;
 
     QNetworkRequest req(QUrl(QStringLiteral("http://127.0.0.1:5001/health")));
+    req.setRawHeader("Authorization", "Bearer " + m_authToken);
+    req.setRawHeader("Accept", "application/json");
+    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                     QNetworkRequest::ManualRedirectPolicy);
     req.setTransferTimeout(1500);
     QNetworkReply *reply = m_nam->get(req);
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -160,14 +188,20 @@ void SAM2ServiceManager::pollHealth()
 
         bool ok = false;
         QString msg = QStringLiteral("SAM2 offline");
-        if (reply->error() == QNetworkReply::NoError) {
+        if (reply->error() == QNetworkReply::NoError
+            && reply->rawHeader(kProtocolHeader) == kProtocolVersion) {
             const QJsonObject obj =
                 QJsonDocument::fromJson(reply->readAll()).object();
-            ok = obj.value(QStringLiteral("sam2_loaded")).toBool(false) ||
-                 obj.value(QStringLiteral("status")).toString() ==
-                     QStringLiteral("ok");
+            const bool authenticated =
+                obj.value(QStringLiteral("auth_required")).toBool(false);
+            ok = authenticated
+                && (obj.value(QStringLiteral("sam2_loaded")).toBool(false)
+                    || obj.value(QStringLiteral("status")).toString()
+                        == QStringLiteral("ok"));
             msg = ok ? QStringLiteral("SAM2 ready")
                      : QStringLiteral("SAM2 starting…");
+        } else if (reply->error() == QNetworkReply::NoError) {
+            msg = QStringLiteral("Insecure or outdated SAM2 service detected");
         }
         applyHealthResult(ok, msg);
         if (!ok)

@@ -126,13 +126,16 @@ If no human detected:
 ```python
 import requests
 import base64
+import os
+
+headers = {'Authorization': f"Bearer {os.environ['DRAWINGSTUDIO_SAM2_TOKEN']}"}
 
 # Load image
 with open('photo.jpg', 'rb') as f:
     image_b64 = base64.b64encode(f.read()).decode('utf-8')
 
 # Detect largest human
-response = requests.post('http://localhost:5001/segment_largest_human', json={
+response = requests.post('http://127.0.0.1:5001/segment_largest_human', headers=headers, json={
     'image': image_b64,
     'confidence': 0.5
 })
@@ -150,33 +153,17 @@ if result['success'] and result.get('human'):
 IMAGE_B64=$(base64 -i photo.jpg)
 
 # Detect all humans
-curl -X POST http://localhost:5001/segment_humans \
+curl -X POST http://127.0.0.1:5001/segment_humans \
+  -H "Authorization: Bearer $DRAWINGSTUDIO_SAM2_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"image\": \"$IMAGE_B64\", \"confidence\": 0.5}"
 ```
 
-### JavaScript/TypeScript
+### Browser clients
 
-```typescript
-async function detectHumans(imageFile: File) {
-  // Convert to base64
-  const base64 = await fileToBase64(imageFile);
-  
-  // Send request
-  const response = await fetch('http://localhost:5001/segment_humans', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      image: base64,
-      confidence: 0.5
-    })
-  });
-  
-  const result = await response.json();
-  console.log(`Detected ${result.count} human(s)`);
-  return result.humans;
-}
-```
+Browser access is intentionally unsupported: the local service does not enable
+CORS. Use DrawingStudio, a native client, or a trusted command-line client with
+the bearer token.
 
 ## Testing
 
@@ -205,7 +192,7 @@ YOLO + SAM2 Human Detection Test
 TEST 1: Detect Largest Human
 ============================================================
 Loading image: photo.jpg
-Sending request to http://localhost:5001/segment_largest_human...
+Sending request to http://127.0.0.1:5001/segment_largest_human...
 
 ============================================================
 DETECTION RESULTS
@@ -286,8 +273,9 @@ The human detection endpoints can be called from your Qt/C++ application:
 
 ```cpp
 // Example integration (pseudo-code)
-QNetworkRequest request(QUrl("http://localhost:5001/segment_largest_human"));
+QNetworkRequest request(QUrl("http://127.0.0.1:5001/segment_largest_human"));
 request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+request.setRawHeader("Authorization", "Bearer " + sam2Token);
 
 QJsonObject json;
 json["image"] = imageToBase64(image);

@@ -358,7 +358,7 @@ void AIImageClient::runRemoteSd(const Request &req)
 {
     QSettings s;
     QString base = s.value(QStringLiteral("AI/remoteSDUrl"),
-                           QStringLiteral("http://192.168.1.58:8000"))
+                           AIImageClient::defaultRemoteSdUrl())
                        .toString()
                        .trimmed();
     if (base.endsWith(QLatin1Char('/')))
@@ -411,5 +411,4 @@ void AIImageClient::runRemoteSd(const Request &req)
         finishWithImage(image, prompt);
     });
 }
-
 

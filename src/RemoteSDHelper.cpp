@@ -9,7 +9,7 @@
 RemoteSDHelper::RemoteSDHelper(QObject* parent)
     : QObject(parent)
     , m_networkManager(new QNetworkAccessManager(this))
-    , m_serverUrl("http://192.168.1.58:8000")
+    , m_serverUrl("http://127.0.0.1:8000")
     , m_currentModel("sd3.5_large.safetensors")
     , m_initialized(false)
     , m_generating(false)

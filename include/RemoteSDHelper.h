@@ -17,7 +17,7 @@ public:
     ~RemoteSDHelper();
 
     // Initialize with server URL
-    bool initialize(const QString& serverUrl = "http://192.168.1.58:8000");
+    bool initialize(const QString& serverUrl = "http://127.0.0.1:8000");
     bool isInitialized() const { return m_initialized; }
     
     // Get available models from server

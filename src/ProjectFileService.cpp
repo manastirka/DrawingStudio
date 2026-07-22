@@ -13,6 +13,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonParseError>
+#include <QSaveFile>
 #include <QThread>
 #include <QUuid>
 #include <memory>
@@ -24,10 +26,20 @@ ProjectFileService::ProjectFileService(QObject *parent)
 }
 
 bool ProjectFileService::saveToFile(const QString& fileName, bool updateSession) {
-    QFile file(fileName);
-    if (!file.open(QIODevice::WriteOnly)) return false;
+    const auto fail = [this, updateSession](const QString &reason) {
+        if (m_host.setStatusText) {
+            m_host.setStatusText(
+                (updateSession ? QStringLiteral("Save failed: ")
+                               : QStringLiteral("Recovery autosave failed: "))
+                + reason);
+        }
+        return false;
+    };
+    if (fileName.trimmed().isEmpty())
+        return fail(QStringLiteral("empty file name"));
 
     QJsonObject json;
+    json["format"] = QStringLiteral("DrawingStudio");
     json["version"] = 1;
 
     // Serialize all layers and their primitives
@@ -65,8 +77,35 @@ bool ProjectFileService::saveToFile(const QString& fileName, bool updateSession)
         json["canvas"] = canvasObj;
     }
 
-    QJsonDocument doc(json);
-    file.write(doc.toJson());
+    const QByteArray payload = QJsonDocument(json).toJson();
+    if (payload.isEmpty())
+        return fail(QStringLiteral("serialization produced no data"));
+
+    QSaveFile file(fileName);
+    file.setDirectWriteFallback(false);
+    if (!file.open(QIODevice::WriteOnly))
+        return fail(file.errorString());
+
+    if (!updateSession) {
+        file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    }
+
+    qint64 writtenTotal = 0;
+    while (writtenTotal < payload.size()) {
+        const qint64 written =
+            file.write(payload.constData() + writtenTotal,
+                       payload.size() - writtenTotal);
+        if (written <= 0) {
+            const QString reason = file.errorString();
+            file.cancelWriting();
+            return fail(reason);
+        }
+        writtenTotal += written;
+    }
+
+    if (!file.commit())
+        return fail(file.errorString());
+
     if (updateSession) {
         if (m_host.setCurrentFile)
             m_host.setCurrentFile(fileName);
@@ -81,43 +120,56 @@ bool ProjectFileService::saveToFile(const QString& fileName, bool updateSession)
 }
 
 bool ProjectFileService::loadFromFile(const QString& fileName) {
-    return loadFromFile(fileName, false);
+    return loadFromFile(fileName, false, true);
 }
 
 bool ProjectFileService::loadFromFile(const QString& fileName, bool waitUntilLoaded) {
+    return loadFromFile(fileName, waitUntilLoaded, true);
+}
+
+bool ProjectFileService::loadFromFile(const QString& fileName,
+                                      bool waitUntilLoaded,
+                                      bool updateSession) {
+    const auto fail = [this](const QString &reason) {
+        if (m_host.setStatusText)
+            m_host.setStatusText(QStringLiteral("Load failed: ") + reason);
+        return false;
+    };
+    if (m_loadInProgress)
+        return fail(QStringLiteral("another project is still loading"));
+
     // Read file bytes on main thread (fast)
     QFile file(fileName);
-    if (!file.open(QIODevice::ReadOnly)) return false;
-    QByteArray fileData = file.readAll();
+    if (!file.open(QIODevice::ReadOnly))
+        return fail(file.errorString());
+    const QByteArray fileData = file.readAll();
+    if (file.error() != QFileDevice::NoError)
+        return fail(file.errorString());
     file.close();
 
-    QJsonDocument doc = QJsonDocument::fromJson(fileData);
-    if (doc.isNull()) return false;
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(fileData, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+        return fail(QStringLiteral("invalid project JSON"));
 
-    QJsonObject json = doc.object();
-
-    // Clear existing content
-    if (m_host.layerManager) {
-        m_host.layerManager->clearLayersNoDefault();
+    const QJsonObject json = doc.object();
+    if (json.contains(QStringLiteral("version"))) {
+        if (!json.value(QStringLiteral("version")).isDouble()
+            || json.value(QStringLiteral("version")).toDouble() != 1.0) {
+            return fail(QStringLiteral("unsupported project version"));
+        }
     }
-    if (m_host.canvas) {
-        m_host.canvas->clearPrimitives();
+    const bool hasLayers = json.contains(QStringLiteral("layers"));
+    const bool hasLegacyPrimitives = json.contains(QStringLiteral("primitives"));
+    if ((hasLayers && !json.value(QStringLiteral("layers")).isArray())
+        || (hasLegacyPrimitives
+            && !json.value(QStringLiteral("primitives")).isArray())
+        || (!hasLayers && !hasLegacyPrimitives)) {
+        return fail(QStringLiteral("missing or invalid project content"));
     }
-    if (m_host.commandManager) {
-        m_host.commandManager->clear();
-    }
-
-    // Restore canvas settings (fast, stays on main thread)
-    if (json.contains("canvas") && m_host.canvas) {
-        QJsonObject canvasObj = json["canvas"].toObject();
-        if (canvasObj.contains("backgroundColor"))
-            m_host.canvas->setBackgroundColor(QColor(canvasObj["backgroundColor"].toString()));
-        if (canvasObj.contains("paperColor"))
-            m_host.canvas->setPaperColor(QColor(canvasObj["paperColor"].toString()));
-        if (canvasObj.contains("gridVisible"))
-            m_host.canvas->setGridVisible(canvasObj["gridVisible"].toBool());
-        if (canvasObj.contains("snapEnabled"))
-            m_host.canvas->setSnapEnabled(canvasObj["snapEnabled"].toBool());
+    if (json.contains(QStringLiteral("canvas"))
+        && !json.value(QStringLiteral("canvas")).isObject()) {
+        return fail(QStringLiteral("invalid canvas settings"));
     }
 
     // Struct to hold parsed results from worker thread
@@ -129,6 +181,11 @@ bool ProjectFileService::loadFromFile(const QString& fileName, bool waitUntilLoa
         double opacity = 1.0;
         std::vector<std::unique_ptr<DrawingPrimitive>> primitives;
     };
+    struct ParsedProject {
+        bool success = true;
+        QString error;
+        std::vector<ParsedLayer> layers;
+    };
 
     // Show spinner for progress feedback
     auto* spinner = new SpinnerDialog("Loading Project", "Parsing project file...", m_host.dialogParent);
@@ -137,26 +194,56 @@ bool ProjectFileService::loadFromFile(const QString& fileName, bool waitUntilLoa
     QCoreApplication::processEvents();
 
     // Parse layers and primitives on a worker thread (the expensive part)
-    auto* parsedLayers = new std::vector<ParsedLayer>();
-    bool isLegacy = json["layers"].toArray().isEmpty();
-    QJsonArray layersArray = json["layers"].toArray();
-    QJsonArray legacyPrimitives = json["primitives"].toArray();
+    auto* parsedProject = new ParsedProject();
+    const bool isLegacy = !hasLayers;
+    const QJsonArray layersArray = json["layers"].toArray();
+    const QJsonArray legacyPrimitives = json["primitives"].toArray();
+    QThread *guiThread = QCoreApplication::instance()->thread();
 
-    QThread* thread = QThread::create([parsedLayers, isLegacy, layersArray, legacyPrimitives]() {
+    QThread* thread = QThread::create(
+        [parsedProject, isLegacy, layersArray, legacyPrimitives, guiThread]() {
+        const auto parsePrimitive = [parsedProject](
+                                        const QJsonValue &value,
+                                        ParsedLayer &layer) {
+            if (!value.isObject()) {
+                parsedProject->success = false;
+                parsedProject->error = QStringLiteral("invalid primitive entry");
+                return false;
+            }
+            auto primitive = DrawingPrimitive::createFromJson(value.toObject());
+            if (!primitive) {
+                parsedProject->success = false;
+                parsedProject->error = QStringLiteral("unsupported or corrupt primitive");
+                return false;
+            }
+            layer.primitives.push_back(std::move(primitive));
+            return true;
+        };
+
         if (isLegacy) {
             // Legacy format: flat primitives array
             ParsedLayer pl;
             pl.name = "Default";
             for (const QJsonValue& val : legacyPrimitives) {
-                auto prim = DrawingPrimitive::createFromJson(val.toObject());
-                if (prim) {
-                    pl.primitives.push_back(std::move(prim));
-                }
+                if (!parsePrimitive(val, pl))
+                    break;
             }
-            parsedLayers->push_back(std::move(pl));
+            if (parsedProject->success)
+                parsedProject->layers.push_back(std::move(pl));
         } else {
             for (const QJsonValue& layerVal : layersArray) {
+                if (!layerVal.isObject()) {
+                    parsedProject->success = false;
+                    parsedProject->error = QStringLiteral("invalid layer entry");
+                    break;
+                }
                 QJsonObject layerObj = layerVal.toObject();
+                if (layerObj.contains(QStringLiteral("primitives"))
+                    && !layerObj.value(QStringLiteral("primitives")).isArray()) {
+                    parsedProject->success = false;
+                    parsedProject->error = QStringLiteral("invalid layer primitives");
+                    break;
+                }
                 ParsedLayer pl;
                 pl.name = layerObj["name"].toString("Layer");
                 pl.id = layerObj["id"].toString();
@@ -166,23 +253,76 @@ bool ProjectFileService::loadFromFile(const QString& fileName, bool waitUntilLoa
 
                 QJsonArray primitivesArray = layerObj["primitives"].toArray();
                 for (const QJsonValue& val : primitivesArray) {
-                    auto prim = DrawingPrimitive::createFromJson(val.toObject());
-                    if (prim) {
-                        pl.primitives.push_back(std::move(prim));
-                    }
+                    if (!parsePrimitive(val, pl))
+                        break;
                 }
-                parsedLayers->push_back(std::move(pl));
+                if (!parsedProject->success)
+                    break;
+                parsedProject->layers.push_back(std::move(pl));
             }
+        }
+
+        if (!parsedProject->success) {
+            // Destroy any partially parsed QObjects on the thread that owns them.
+            parsedProject->layers.clear();
+            return;
+        }
+        // Parsed primitives are installed and used on the GUI thread.
+        for (auto &layer : parsedProject->layers) {
+            for (auto &primitive : layer.primitives)
+                primitive->moveToThread(guiThread);
         }
     });
 
-    auto* loadDone = waitUntilLoaded ? new QEventLoop(this) : nullptr;
+    m_loadInProgress = true;
+    auto loadSucceeded = std::make_shared<bool>(false);
+    QEventLoop loadLoop;
+    QEventLoop *loadDone = waitUntilLoaded ? &loadLoop : nullptr;
 
-    connect(thread, &QThread::finished, this, [this, thread, parsedLayers, spinner, fileName, loadDone]() {
+    connect(thread, &QThread::finished, this,
+            [this, thread, parsedProject, spinner, fileName, json,
+             updateSession, loadSucceeded, loadDone]() {
+        m_loadInProgress = false;
+        if (!parsedProject->success) {
+            const QString error = parsedProject->error;
+            delete parsedProject;
+            spinner->hide();
+            spinner->deleteLater();
+            if (m_host.setStatusText)
+                m_host.setStatusText(QStringLiteral("Load failed: ") + error);
+            thread->deleteLater();
+            if (loadDone)
+                loadDone->quit();
+            return;
+        }
+
+        // Replace the current document only after the entire incoming project
+        // has parsed successfully.
+        if (m_host.layerManager)
+            m_host.layerManager->clearLayersNoDefault();
+        if (m_host.canvas)
+            m_host.canvas->clearPrimitives();
+        if (m_host.commandManager)
+            m_host.commandManager->clear();
+
+        if (json.contains("canvas") && m_host.canvas) {
+            const QJsonObject canvasObj = json["canvas"].toObject();
+            if (canvasObj.contains("backgroundColor"))
+                m_host.canvas->setBackgroundColor(
+                    QColor(canvasObj["backgroundColor"].toString()));
+            if (canvasObj.contains("paperColor"))
+                m_host.canvas->setPaperColor(
+                    QColor(canvasObj["paperColor"].toString()));
+            if (canvasObj.contains("gridVisible"))
+                m_host.canvas->setGridVisible(canvasObj["gridVisible"].toBool());
+            if (canvasObj.contains("snapEnabled"))
+                m_host.canvas->setSnapEnabled(canvasObj["snapEnabled"].toBool());
+        }
+
         // Install parsed results into layers (main thread)
         if (m_host.layerManager) {
             int totalInstalled = 0;
-            for (auto& pl : *parsedLayers) {
+            for (auto& pl : parsedProject->layers) {
                 Layer* layer = nullptr;
                 if (!pl.id.isEmpty()) {
                     layer = m_host.layerManager->createLayer(QUuid(pl.id), pl.name);
@@ -202,17 +342,27 @@ bool ProjectFileService::loadFromFile(const QString& fileName, bool waitUntilLoa
                         QCoreApplication::processEvents();
                 }
             }
+            if (parsedProject->layers.empty())
+                m_host.layerManager->createLayer(QStringLiteral("Background"));
         }
 
-        delete parsedLayers;
+        delete parsedProject;
         spinner->hide();
         spinner->deleteLater();
 
-        if (m_host.setCurrentFile) m_host.setCurrentFile(fileName);
-        if (m_host.addToRecentFiles) m_host.addToRecentFiles(fileName);
+        if (updateSession) {
+            if (m_host.setCurrentFile) m_host.setCurrentFile(fileName);
+            if (m_host.addToRecentFiles) m_host.addToRecentFiles(fileName);
+        }
         if (m_host.canvas) m_host.canvas->update();
         if (m_host.refreshLayerPanel) m_host.refreshLayerPanel();
-        if (m_host.setStatusText) m_host.setStatusText("Loaded: " + fileName);
+        if (m_host.setStatusText) {
+            m_host.setStatusText(
+                updateSession ? QStringLiteral("Loaded: ") + fileName
+                              : QStringLiteral("Loaded recovery snapshot"));
+        }
+
+        *loadSucceeded = true;
 
         thread->deleteLater();
         if (loadDone)
@@ -222,8 +372,8 @@ bool ProjectFileService::loadFromFile(const QString& fileName, bool waitUntilLoa
     thread->start();
 
     if (loadDone) {
-        loadDone->exec();
-        loadDone->deleteLater();
+        loadLoop.exec();
+        return *loadSucceeded;
     }
     return true;
 }

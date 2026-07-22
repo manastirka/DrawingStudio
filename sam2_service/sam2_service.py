@@ -6,7 +6,6 @@ Enhanced accuracy with multi-scale detection and iterative refinement
 """
 
 from flask import Flask, request, jsonify
-from flask_cors import CORS
 import torch
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
@@ -17,9 +16,42 @@ import sys
 import os
 from functools import lru_cache
 import hashlib
+import hmac
 
 app = Flask(__name__)
-CORS(app)
+app.config['MAX_CONTENT_LENGTH'] = 64 * 1024 * 1024
+
+SAM2_PROTOCOL_VERSION = '2'
+SAM2_AUTH_TOKEN = os.environ.get('DRAWINGSTUDIO_SAM2_TOKEN', '').strip().encode('utf-8')
+if len(SAM2_AUTH_TOKEN) < 16:
+    raise RuntimeError(
+        'DRAWINGSTUDIO_SAM2_TOKEN must contain at least 16 bytes; '
+        'start the service through DrawingStudio or set it explicitly')
+
+
+@app.before_request
+def require_authentication():
+    """Reject every request that does not carry the per-session bearer token."""
+    supplied = request.headers.get('Authorization', '').encode('utf-8')
+    expected = b'Bearer ' + SAM2_AUTH_TOKEN
+    if not hmac.compare_digest(supplied, expected):
+        return jsonify({'status': 'error', 'error': 'Unauthorized'}), 401
+    content_length = request.content_length
+    if content_length is not None and content_length > app.config['MAX_CONTENT_LENGTH']:
+        return jsonify({'status': 'error', 'error': 'Request body too large'}), 413
+
+
+@app.after_request
+def secure_response(response):
+    response.headers['Cache-Control'] = 'no-store'
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-DrawingStudio-SAM2-Protocol'] = SAM2_PROTOCOL_VERSION
+    return response
+
+
+@app.errorhandler(413)
+def request_too_large(_error):
+    return jsonify({'status': 'error', 'error': 'Request body too large'}), 413
 
 # Global variables
 predictor = None
@@ -324,6 +356,8 @@ def health_check():
     cache_stats = mask_cache.get_stats()
     return jsonify({
         'status': 'ok',
+        'auth_required': True,
+        'protocol_version': SAM2_PROTOCOL_VERSION,
         'sam2_loaded': predictor is not None,
         'device': str(device) if device else 'none',
         'cache': cache_stats
@@ -1583,7 +1617,7 @@ if __name__ == '__main__':
     # Initialize SAM2
     if initialize_sam2():
         print("\n✓ Service ready!")
-        print("Listening on http://localhost:5001")  # Changed from 5000 to 5001
+        print("Listening on authenticated http://127.0.0.1:5001")
         print("\nEndpoints:")
         print("  GET  /health                  - Health check")
         print("  POST /segment                 - Automatic segmentation (slow, high quality)")
@@ -1595,7 +1629,7 @@ if __name__ == '__main__':
         print("\nPress Ctrl+C to stop")
         print("=" * 60)
         
-        app.run(host='0.0.0.0', port=5001, debug=False)  # Changed port to 5001
+        app.run(host='127.0.0.1', port=5001, debug=False)
     else:
         print("\n✗ Failed to initialize SAM2")
         print("Please check the error messages above")

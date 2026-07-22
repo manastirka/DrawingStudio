@@ -1,4 +1,5 @@
 #include "DrawingCommandDispatcher.h"
+#include "AutomationCommandCatalog.h"
 
 #include "DrawingPrimitive.h"
 #include "DXFExporter.h"
@@ -219,10 +220,21 @@ return (imgPrim && imgPrim->getMaskCandidateCount() > 0) ? imgPrim : nullptr;
 
 void DrawingCommandDispatcher::execute(const QString &action, const QJsonObject &params)
 {
-    if (!m_ctx.canvas) return;
-
     // Clear previous result so analysis commands can populate it
     m_lastResult = QJsonObject();
+
+    if (!AutomationCommandCatalog::containsAction(action)) {
+        qWarning() << "CommandServer: Unknown action:" << action;
+        m_lastResult["success"] = false;
+        m_lastResult["error"] = QStringLiteral("Unknown action: %1").arg(action);
+        return;
+    }
+
+    if (!m_ctx.canvas) {
+        m_lastResult["success"] = false;
+        m_lastResult["error"] = QStringLiteral("Canvas unavailable");
+        return;
+    }
 
     if (tryExecuteDraw(action, params)
         || tryExecuteEdit(action, params)
@@ -239,10 +251,8 @@ void DrawingCommandDispatcher::execute(const QString &action, const QJsonObject 
         return;
     }
 
-    qWarning() << "CommandServer: Unknown action:" << action;
-    QJsonObject result;
-    result["success"] = false;
-    result["error"] = QStringLiteral("Unknown action: %1").arg(action);
-    m_lastResult = result;
+    qCritical() << "Automation catalog action has no dispatcher handler:" << action;
+    m_lastResult["success"] = false;
+    m_lastResult["error"] =
+        QStringLiteral("Catalog mismatch: no handler for %1").arg(action);
 }
-

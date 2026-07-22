@@ -5,6 +5,7 @@
 #include <QTimer>
 #include <QString>
 #include <QNetworkAccessManager>
+#include <QByteArray>
 
 /**
  * Owns the optional local SAM2 Python service process and exposes health status.
@@ -44,5 +45,6 @@ private:
     bool m_ownedProcess = false;
     bool m_launchAttempted = false;
     bool m_healthInFlight = false;
+    QByteArray m_authToken;
     QString m_statusMessage;
 };

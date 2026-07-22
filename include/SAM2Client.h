@@ -4,6 +4,7 @@
 #include <QMetaType>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QObject>
 #include <QPointF>
 #include <QRectF>
@@ -14,6 +15,12 @@ class SAM2Client : public QObject {
 
 public:
   explicit SAM2Client(QObject *parent = nullptr);
+
+  static constexpr qsizetype kMinAuthTokenBytes = 16;
+
+  // Shared by all clients in this process. SAM2ServiceManager sets this before
+  // launching or probing the local helper service.
+  static void setDefaultAuthToken(const QByteArray &token);
 
   struct SegmentationResult {
     QImage mask; // Binary mask (white = subject, black = background)
@@ -53,8 +60,9 @@ public:
   // Box-based segmentation (user draws box around subject)
   void segmentWithBox(const QImage &image, const QRectF &box);
 
-  // Set service URL (default: http://localhost:5001)
-  void setServiceUrl(const QString &url) { m_serviceUrl = url; }
+  // Set a loopback HTTP service URL (default: http://127.0.0.1:5001).
+  // Non-loopback URLs are rejected so the bearer token cannot be exfiltrated.
+  void setServiceUrl(const QString &url);
   QString serviceUrl() const { return m_serviceUrl; }
 
   // Access methods for internal use
@@ -73,6 +81,8 @@ private:
 
   QByteArray imageToBase64(const QImage &image);
   QImage base64ToMask(const QString &base64, int width, int height);
+  static void authorizeRequest(QNetworkRequest &request);
+  static bool isAuthenticatedProtocol(const QNetworkReply *reply);
   void handleSegmentationResponse(QNetworkReply *reply);
   void handleAllObjectsResponse(QNetworkReply *reply);
 };

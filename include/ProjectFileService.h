@@ -36,7 +36,12 @@ public:
     bool saveToFile(const QString &fileName, bool updateSession = true);
     bool loadFromFile(const QString &fileName);
     bool loadFromFile(const QString &fileName, bool waitUntilLoaded);
+    /** Suppress session/recent-file callbacks when restoring a recovery snapshot. */
+    bool loadFromFile(const QString &fileName, bool waitUntilLoaded,
+                      bool updateSession);
+    bool isLoadInProgress() const { return m_loadInProgress; }
 
 private:
     Host m_host;
+    bool m_loadInProgress = false;
 };

@@ -155,6 +155,7 @@ set(SOURCES
     src/SelectionManager.cpp
     include/SelectionManager.h
     src/CommandServer.cpp
+    src/AutomationCommandCatalog.cpp
     src/DrawingCommandDispatcher.cpp
     src/DrawingCommandDispatcherDraw.cpp
     src/DrawingCommandDispatcherEdit.cpp
@@ -287,6 +288,7 @@ set(HEADERS
     include/CoreMLDiffusionHelper.h
     include/RemoteSDHelper.h
     include/CommandServer.h
+    include/AutomationCommandCatalog.h
     include/DrawingCommandDispatcher.h
     include/FloatingMaskPanel.h
     include/ImageAdjustmentController.h

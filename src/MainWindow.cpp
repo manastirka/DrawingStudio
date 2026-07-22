@@ -102,6 +102,11 @@
 #include "SpinnerDialog.h"
 
 MainWindow::MainWindow(QWidget *parent)
+    : MainWindow(AutomationOptions{}, parent)
+{
+}
+
+MainWindow::MainWindow(const AutomationOptions &automation, QWidget *parent)
     : QMainWindow(parent)
     , m_canvas(nullptr)
     , m_propertiesDock(nullptr)
@@ -153,16 +158,24 @@ MainWindow::MainWindow(QWidget *parent)
                 });
     }
 
-    // Start command server for bot integration
-    m_commandServer = new CommandServer(this);
-    m_commandServer->setCanvas(m_canvas);
-    m_commandServer->setWindowWidget(this);
-    m_commandServer->setCommandResultProvider([this]() {
-        return lastCommandResult();
-    });
-    m_commandServer->start(19100);
-    connect(m_commandServer, &CommandServer::commandReceived,
-            this, &MainWindow::executeDrawingCommand);
+    // The automation API is disabled unless explicitly enabled at launch.
+    if (automation.enabled) {
+        m_commandServer = new CommandServer(this);
+        m_commandServer->setAuthToken(automation.token);
+        m_commandServer->setFilesystemCommandsAllowed(automation.allowFilesystemCommands);
+        m_commandServer->setCanvas(m_canvas);
+        m_commandServer->setWindowWidget(this);
+        m_commandServer->setCommandResultProvider([this]() {
+            return lastCommandResult();
+        });
+        connect(m_commandServer, &CommandServer::commandReceived,
+                this, &MainWindow::executeDrawingCommand);
+        if (!m_commandServer->start(automation.port)) {
+            qWarning() << "DrawingStudio automation API failed to start";
+            m_commandServer->deleteLater();
+            m_commandServer = nullptr;
+        }
+    }
 
     m_sam2Service = new SAM2ServiceManager(this);
     connect(m_sam2Service, &SAM2ServiceManager::statusChanged, this,
@@ -687,4 +700,3 @@ void MainWindow::applyPropertyToPrimitive(DrawingPrimitive* primitive, const QSt
 {
     PrimitivePropertyApplier::apply(primitive, propertyName, value);
 }
-

@@ -21,7 +21,16 @@
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    if (m_projectFileService && m_projectFileService->isLoadInProgress()) {
+        if (m_statusLabel)
+            m_statusLabel->setText(QStringLiteral("Wait for project loading to finish"));
+        event->ignore();
+        return;
+    }
     if (maybeSave()) {
+        // A clean shutdown—whether saved or explicitly discarded—must not
+        // trigger a stale crash-recovery prompt next time.
+        clearRecoveryFile();
         // Save window settings
         QSettings settings;
         settings.setValue("geometry", saveGeometry());
@@ -115,6 +124,8 @@ void MainWindow::performAutosave()
                 QStringLiteral("Autosaved recovery · %1")
                     .arg(QTime::currentTime().toString(QStringLiteral("HH:mm"))));
         }
+    } else if (m_statusLabel) {
+        m_statusLabel->setText(QStringLiteral("Recovery autosave failed"));
     }
 }
 
@@ -122,8 +133,12 @@ void MainWindow::checkRecoveryFileOnStartup()
 {
     const QString path = recoveryFilePath();
     QFileInfo info(path);
-    if (!info.exists() || info.size() < 32)
+    if (!info.exists())
         return;
+    if (info.size() < 32) {
+        clearRecoveryFile();
+        return;
+    }
 
     const auto ret = QMessageBox::question(
         this, QStringLiteral("Recover Project"),
@@ -136,7 +151,9 @@ void MainWindow::checkRecoveryFileOnStartup()
         clearRecoveryFile();
         return;
     }
-    if (loadProjectFromFile(path, true)) {
+    ensureProjectFileHost();
+    if (projectFileService()->loadFromFile(
+            path, /*waitUntilLoaded=*/true, /*updateSession=*/false)) {
         // Keep as untitled dirty document so user chooses where to save.
         m_currentFile.clear();
         m_isModified = true;
@@ -145,6 +162,11 @@ void MainWindow::checkRecoveryFileOnStartup()
         updateWindowTitle();
         if (m_statusLabel)
             m_statusLabel->setText(QStringLiteral("Restored recovery autosave — use Save As…"));
+    } else {
+        QMessageBox::warning(
+            this, QStringLiteral("Recover Project"),
+            QStringLiteral("The recovery snapshot could not be loaded and was left at:\n%1")
+                .arg(path));
     }
 }
 
@@ -262,6 +284,7 @@ void MainWindow::newProject()
     updateUndoHistoryPanel();
 
     setCurrentFile(QString());
+    clearRecoveryFile();
     if (m_statusLabel) {
         m_statusLabel->setText("New project created");
     }
