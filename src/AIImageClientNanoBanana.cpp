@@ -191,7 +191,7 @@ void AIImageClient::postNanoBananaGenerate(Request req, bool isEdit, int attempt
     request.setHeader(QNetworkRequest::ContentTypeHeader,
                       QStringLiteral("application/json"));
     request.setRawHeader("x-goog-api-key", apiKey.toUtf8());
-    request.setTransferTimeout(180000);
+    applyRequestPolicy(request);
 
     if (attempt == 0)
         emit progress(QStringLiteral("Nano Banana (%1, %2)…").arg(model, imgSize));
@@ -200,15 +200,16 @@ void AIImageClient::postNanoBananaGenerate(Request req, bool isEdit, int attempt
 
     QNetworkReply *reply =
         m_nam->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
-    watchReply(reply, 180000);
+    watchReply(reply);
 
     connect(reply, &QNetworkReply::finished, this,
             [this, reply, req, isEdit, attempt, model, imgSize]() {
         reply->deleteLater();
         const QByteArray body = reply->readAll();
-        if (reply->error() != QNetworkReply::NoError) {
+        const QString error = networkReplyError(reply);
+        if (!error.isEmpty()) {
             const QString detail = QString::fromUtf8(body.left(800));
-            if (reply->error() == QNetworkReply::OperationCanceledError) {
+            if (error.contains(QStringLiteral("timed out"), Qt::CaseInsensitive)) {
                 failWith(QStringLiteral(
                     "Nano Banana timed out after 3 minutes (model %1). Try 1K/2K or a shorter prompt.")
                              .arg(model));
@@ -225,7 +226,7 @@ void AIImageClient::postNanoBananaGenerate(Request req, bool isEdit, int attempt
                 return;
             }
             failWith(QStringLiteral("Nano Banana failed (%1): %2\n%3")
-                         .arg(model, reply->errorString(), detail));
+                         .arg(model, error, detail));
             return;
         }
 
@@ -303,5 +304,4 @@ void AIImageClient::postNanoBananaGenerate(Request req, bool isEdit, int attempt
                      .arg(explainNanoBananaFinishReason(finishReason), model, imgSize));
     });
 }
-
 

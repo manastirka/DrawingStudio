@@ -32,6 +32,12 @@ class DrawingPrimitive : public QObject
     Q_OBJECT
     
 public:
+    static constexpr qsizetype kMaxSerializedPointsPerPrimitive = 10000;
+    static constexpr double kMaxSerializedCoordinateMagnitude = 1.0e9;
+    static constexpr float kMaxLineWidth = 1000.0f;
+    static constexpr float kMaxShadowBlur = 1000.0f;
+    static constexpr float kMaxShadowOffset = 10000.0f;
+
     explicit DrawingPrimitive(PrimitiveType type = PrimitiveType::Line, QObject* parent = nullptr);
     virtual ~DrawingPrimitive() = default;
     
@@ -48,27 +54,36 @@ public:
     // Serialization
     virtual QJsonObject toJson() const;
     virtual void fromJson(const QJsonObject& json);
+    static bool validateJson(const QJsonObject &json, QString *error = nullptr);
+    static qsizetype serializedPointCount(const QJsonObject &json);
     static std::unique_ptr<DrawingPrimitive> createFromJson(const QJsonObject& json);
     
     // Properties
     PrimitiveType type() const { return m_type; }
     QColor color() const { return m_color; }
-    void setColor(const QColor &color) { m_color = color; }
+    void setColor(const QColor &color) {
+        if (color.isValid()) m_color = color;
+    }
 
     // Opacity multiplier used for layer opacity
     float opacityMultiplier() const { return m_opacityMultiplier; }
-    void setOpacityMultiplier(float multiplier) { m_opacityMultiplier = multiplier; }
+    void setOpacityMultiplier(float multiplier);
 
     QColor fillColor() const { return m_fillColor; }
-    void setFillColor(const QColor &color) { m_fillColor = color; m_hasFillColor = true; }
+    void setFillColor(const QColor &color) {
+        if (color.isValid()) {
+            m_fillColor = color;
+            m_hasFillColor = true;
+        }
+    }
     bool hasFillColor() const { return m_hasFillColor; }
     void clearFillColor() { m_hasFillColor = false; }
     
     float lineWidth() const { return m_lineWidth; }
-    void setLineWidth(float width) { m_lineWidth = width; }
+    void setLineWidth(float width);
     
     Qt::PenStyle lineStyle() const { return m_lineStyle; }
-    void setLineStyle(Qt::PenStyle style) { m_lineStyle = style; }
+    void setLineStyle(Qt::PenStyle style);
     
     bool isSelected() const { return m_selected; }
     void setSelected(bool selected) { m_selected = selected; }
@@ -78,7 +93,7 @@ public:
 
     // Shape rotation in degrees (Image/Text keep their own rotation APIs)
     float rotationDegrees() const { return m_rotationDegrees; }
-    void setRotationDegrees(float degrees) { m_rotationDegrees = degrees; }
+    void setRotationDegrees(float degrees);
 
     // Soft grouping — same non-null id moves/selects together
     QUuid groupId() const { return m_groupId; }
@@ -96,7 +111,7 @@ public:
     QColor gradientEndColor() const { return m_gradientEndColor; }
     void setGradientEndColor(const QColor& c) { m_gradientEndColor = c; }
     float gradientAngle() const { return m_gradientAngle; }
-    void setGradientAngle(float a) { m_gradientAngle = a; }
+    void setGradientAngle(float angle);
     QBrush createGradientBrush(const QRectF& bounds) const;
 
     // Shadow properties
@@ -105,13 +120,15 @@ public:
     
     float shadowOffsetX() const { return m_shadowOffsetX; }
     float shadowOffsetY() const { return m_shadowOffsetY; }
-    void setShadowOffset(float x, float y) { m_shadowOffsetX = x; m_shadowOffsetY = y; }
+    void setShadowOffset(float x, float y);
     
     float shadowBlur() const { return m_shadowBlur; }
-    void setShadowBlur(float blur) { m_shadowBlur = blur; }
+    void setShadowBlur(float blur);
     
     QColor shadowColor() const { return m_shadowColor; }
-    void setShadowColor(const QColor& color) { m_shadowColor = color; }
+    void setShadowColor(const QColor& color) {
+        if (color.isValid()) m_shadowColor = color;
+    }
     
     // Layer assignment
     const QUuid& layerId() const { return m_layerId; }
@@ -308,7 +325,7 @@ public:
     void setFilled(bool filled) { m_filled = filled; }
     
     int curveType() const { return m_curveType; }
-    void setCurveType(int type) { m_curveType = type; }
+    void setCurveType(int type) { m_curveType = qBound(0, type, 2); }
     
     bool showControlPolygon() const { return m_showControlPolygon; }
     void setShowControlPolygon(bool show) { m_showControlPolygon = show; }
@@ -364,7 +381,9 @@ public:
     void setShowControlLines(bool show) { m_showControlLines = show; }
     
     int subdivisionLevel() const { return m_subdivisionLevel; }
-    void setSubdivisionLevel(int level) { m_subdivisionLevel = level; }
+    void setSubdivisionLevel(int level) {
+        m_subdivisionLevel = qBound(10, level, 200);
+    }
     
     bool autoTangents() const { return m_autoTangents; }
     void setAutoTangents(bool auto_tangents) { m_autoTangents = auto_tangents; }
@@ -418,13 +437,19 @@ public:
     void setFilled(bool filled) { m_filled = filled; }
     
     float smoothness() const { return m_smoothness; }
-    void setSmoothness(float smoothness) { m_smoothness = smoothness; }
+    void setSmoothness(float smoothness) {
+        m_smoothness = qBound(0.0f, smoothness, 1.0f);
+    }
     
     int interpolationType() const { return m_interpolationType; }
-    void setInterpolationType(int type) { m_interpolationType = type; }
+    void setInterpolationType(int type) {
+        m_interpolationType = qBound(0, type, 2);
+    }
     
     float tension() const { return m_tension; }
-    void setTension(float tension) { m_tension = tension; }
+    void setTension(float tension) {
+        m_tension = qBound(0.0f, tension, 1.0f);
+    }
     
     bool autoSmooth() const { return m_autoSmooth; }
     void setAutoSmooth(bool autoSmooth) { m_autoSmooth = autoSmooth; }

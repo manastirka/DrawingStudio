@@ -69,20 +69,22 @@ void AIImageClient::runOpenAI(const Request &req, bool isEdit)
             QUrl(QStringLiteral("https://api.openai.com/v1/images/edits")));
         request.setRawHeader("Authorization",
                              QStringLiteral("Bearer %1").arg(apiKey).toUtf8());
+        applyRequestPolicy(request);
 
         QNetworkReply *reply = m_nam->post(request, multi);
         multi->setParent(reply);
+        watchReply(reply);
 
         connect(reply, &QNetworkReply::finished, this, [this, reply, prompt = req.prompt]() {
             reply->deleteLater();
-            if (reply->error() != QNetworkReply::NoError) {
+            const QByteArray body = reply->readAll();
+            const QString error = networkReplyError(reply);
+            if (!error.isEmpty()) {
                 failWith(QStringLiteral("OpenAI edit failed: %1\n%2")
-                             .arg(reply->errorString(),
-                                  QString::fromUtf8(reply->readAll())));
+                             .arg(error, QString::fromUtf8(body.left(800))));
                 return;
             }
-            const QJsonObject obj =
-                QJsonDocument::fromJson(reply->readAll()).object();
+            const QJsonObject obj = QJsonDocument::fromJson(body).object();
             const QJsonArray data = obj.value(QStringLiteral("data")).toArray();
             if (data.isEmpty()) {
                 failWith(QStringLiteral("OpenAI edit returned no image data."));
@@ -122,18 +124,21 @@ void AIImageClient::runOpenAI(const Request &req, bool isEdit)
                       QStringLiteral("application/json"));
     request.setRawHeader("Authorization",
                          QStringLiteral("Bearer %1").arg(apiKey).toUtf8());
+    applyRequestPolicy(request);
 
     QNetworkReply *reply =
         m_nam->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    watchReply(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, prompt = req.prompt]() {
         reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
+        const QByteArray body = reply->readAll();
+        const QString error = networkReplyError(reply);
+        if (!error.isEmpty()) {
             failWith(QStringLiteral("OpenAI generate failed: %1\n%2")
-                         .arg(reply->errorString(),
-                              QString::fromUtf8(reply->readAll())));
+                         .arg(error, QString::fromUtf8(body.left(800))));
             return;
         }
-        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const QJsonObject obj = QJsonDocument::fromJson(body).object();
         const QJsonArray data = obj.value(QStringLiteral("data")).toArray();
         if (data.isEmpty()) {
             failWith(QStringLiteral("OpenAI returned no image data."));
@@ -199,18 +204,21 @@ void AIImageClient::runStability(const Request &req, bool /*isEdit*/)
     request.setRawHeader("Authorization",
                          QStringLiteral("Bearer %1").arg(apiKey).toUtf8());
     request.setRawHeader("Accept", "application/json");
+    applyRequestPolicy(request);
 
     QNetworkReply *reply =
         m_nam->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    watchReply(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, prompt = req.prompt]() {
         reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
+        const QByteArray body = reply->readAll();
+        const QString error = networkReplyError(reply);
+        if (!error.isEmpty()) {
             failWith(QStringLiteral("Stability failed: %1\n%2")
-                         .arg(reply->errorString(),
-                              QString::fromUtf8(reply->readAll())));
+                         .arg(error, QString::fromUtf8(body.left(800))));
             return;
         }
-        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const QJsonObject obj = QJsonDocument::fromJson(body).object();
         const QJsonArray artifacts = obj.value(QStringLiteral("artifacts")).toArray();
         if (artifacts.isEmpty()) {
             failWith(QStringLiteral("Stability returned no artifacts."));
@@ -364,6 +372,14 @@ void AIImageClient::runRemoteSd(const Request &req)
     if (base.endsWith(QLatin1Char('/')))
         base.chop(1);
 
+    const QUrl endpoint(base + QStringLiteral("/generate"));
+    if (!endpoint.isValid() || endpoint.host().isEmpty()
+        || (endpoint.scheme() != QLatin1String("http")
+            && endpoint.scheme() != QLatin1String("https"))) {
+        failWith(QStringLiteral("Remote SD URL must be a valid HTTP(S) URL."));
+        return;
+    }
+
     const QString size = sizeSetting(req);
     const QStringList parts = size.split(QLatin1Char('x'));
     int w = 512;
@@ -379,20 +395,23 @@ void AIImageClient::runRemoteSd(const Request &req)
     payload.insert(QStringLiteral("height"), h);
     payload.insert(QStringLiteral("steps"), 20);
 
-    QNetworkRequest request(QUrl(base + QStringLiteral("/generate")));
+    QNetworkRequest request(endpoint);
     request.setHeader(QNetworkRequest::ContentTypeHeader,
                       QStringLiteral("application/json"));
+    applyRequestPolicy(request);
     QNetworkReply *reply =
         m_nam->post(request, QJsonDocument(payload).toJson(QJsonDocument::Compact));
+    watchReply(reply);
     connect(reply, &QNetworkReply::finished, this, [this, reply, prompt = req.prompt]() {
         reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
+        const QByteArray body = reply->readAll();
+        const QString error = networkReplyError(reply);
+        if (!error.isEmpty()) {
             failWith(QStringLiteral("Remote SD failed: %1\n%2")
-                         .arg(reply->errorString(),
-                              QString::fromUtf8(reply->readAll())));
+                         .arg(error, QString::fromUtf8(body.left(800))));
             return;
         }
-        const QJsonObject obj = QJsonDocument::fromJson(reply->readAll()).object();
+        const QJsonObject obj = QJsonDocument::fromJson(body).object();
         QString b64 = obj.value(QStringLiteral("image")).toString();
         if (b64.isEmpty())
             b64 = obj.value(QStringLiteral("base64")).toString();
@@ -411,4 +430,3 @@ void AIImageClient::runRemoteSd(const Request &req)
         finishWithImage(image, prompt);
     });
 }
-

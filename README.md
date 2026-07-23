@@ -172,6 +172,10 @@ authenticated, and responses from older unauthenticated services are rejected.
 The helper does not enable browser CORS and rejects request bodies larger than
 64 MiB.
 
+SAM mask-cache entries are written atomically and validated before use. Corrupt,
+outdated, hash-mismatched, oversized, or dimensionally invalid entries are
+discarded so they cannot masquerade as successful detection results.
+
 For an externally managed helper, give both processes the same strong token:
 
 ```bash
@@ -187,6 +191,11 @@ without saving those draft API keys or endpoints. Only **Save** persists the
 form. Remote Stable Diffusion defaults to `http://127.0.0.1:8000`; probes accept
 only HTTP(S) URLs, refuse redirects, and time out after 15 seconds.
 
+AI generation and edit requests time out after three minutes, result downloads
+after one minute, and network responses are capped at 128 MiB. Requests carrying
+provider credentials and Remote SD prompts do not follow redirects; downloaded
+result images may follow only redirects that do not downgrade HTTPS.
+
 ### Project persistence and recovery
 
 Project saves and two-minute recovery snapshots use atomic replacement, so a
@@ -194,6 +203,29 @@ failed or interrupted write does not truncate the previous file. Incoming
 projects are fully validated and parsed before the current document is replaced.
 After restoring a crash snapshot, DrawingStudio keeps that snapshot until the
 project is explicitly saved or the application closes cleanly.
+Project persistence also enforces a 256 MiB file limit, 4,096-layer limit, and
+100,000-primitive limit on both save and load to avoid unbounded JSON memory use.
+Vector geometry is limited to 10,000 points per primitive and 100,000 points per
+project; coordinates must be finite and within the supported canvas range.
+Scalar geometry for lines, shapes, dimensions, text, and images follows the
+same finite ±1 billion canvas range; radii cannot be negative and serialized
+image dimensions must be positive.
+Shared primitive styling is normalized at the model boundary: opacity stays
+within 0–1, line width and shadow blur within 0–1,000, shadow offsets within
+±10,000, and shape rotation within ±360 degrees. Invalid serialized colors,
+pen styles, or non-numeric style fields reject the primitive.
+
+Image resizing keeps dimensions finite and positive, prevents handles from
+crossing their opposite edges, and preserves the source ratio when aspect lock
+is enabled. Aspect-lock state is also retained in saved projects.
+
+Saved images retain mask candidates, multi-selection, inversion, overlay, and
+refinement settings. Undo/redo and project loading clear optional mask data
+before restoration, preventing stale contours from leaking between snapshots;
+refinement values are bounded to their supported UI ranges.
+Embedded project images use strict base64/PNG decoding and are limited to
+64 MiB compressed, 16,384 pixels per dimension, and 64 megapixels decoded.
+An invalid embedded image rejects the project before the open document changes.
 
 ### Windows (Visual Studio):
 ```cmd

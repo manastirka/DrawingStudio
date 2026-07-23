@@ -14,6 +14,8 @@
 #include <QtMath>
 #include <cmath>
 #include <algorithm>
+#include <initializer_list>
+#include <limits>
 #include <vector>
 #include <array>
 // Base DrawingPrimitive (refactor E21).
@@ -33,6 +35,53 @@ DrawingPrimitive::DrawingPrimitive(PrimitiveType type, QObject* parent)
     , m_id(QUuid::createUuid()) // Generate unique ID
     , m_layerId(QUuid()) // Default to null UUID
 {
+}
+
+void DrawingPrimitive::setOpacityMultiplier(float multiplier)
+{
+    if (std::isfinite(multiplier))
+        m_opacityMultiplier = std::clamp(multiplier, 0.0f, 1.0f);
+}
+
+void DrawingPrimitive::setLineWidth(float width)
+{
+    if (std::isfinite(width))
+        m_lineWidth = std::clamp(width, 0.0f, kMaxLineWidth);
+}
+
+void DrawingPrimitive::setLineStyle(Qt::PenStyle style)
+{
+    const int value = static_cast<int>(style);
+    if (value >= static_cast<int>(Qt::NoPen)
+        && value <= static_cast<int>(Qt::CustomDashLine)) {
+        m_lineStyle = style;
+    }
+}
+
+void DrawingPrimitive::setRotationDegrees(float degrees)
+{
+    if (std::isfinite(degrees))
+        m_rotationDegrees = std::clamp(degrees, -360.0f, 360.0f);
+}
+
+void DrawingPrimitive::setGradientAngle(float angle)
+{
+    if (std::isfinite(angle))
+        m_gradientAngle = std::clamp(angle, -360.0f, 360.0f);
+}
+
+void DrawingPrimitive::setShadowOffset(float x, float y)
+{
+    if (std::isfinite(x))
+        m_shadowOffsetX = std::clamp(x, -kMaxShadowOffset, kMaxShadowOffset);
+    if (std::isfinite(y))
+        m_shadowOffsetY = std::clamp(y, -kMaxShadowOffset, kMaxShadowOffset);
+}
+
+void DrawingPrimitive::setShadowBlur(float blur)
+{
+    if (std::isfinite(blur))
+        m_shadowBlur = std::clamp(blur, 0.0f, kMaxShadowBlur);
 }
 
 QBrush DrawingPrimitive::createGradientBrush(const QRectF& bounds) const {
@@ -122,22 +171,32 @@ void DrawingPrimitive::fromJson(const QJsonObject& json)
             m_id = loadedId;
         }
     }
-    m_color = QColor(json["color"].toString(m_color.name(QColor::HexArgb)));
-    m_fillColor = QColor(json["fillColor"].toString(m_fillColor.name(QColor::HexArgb)));
+    setColor(QColor(json["color"].toString(m_color.name(QColor::HexArgb))));
+    const QColor loadedFill(
+        json["fillColor"].toString(m_fillColor.name(QColor::HexArgb)));
+    if (loadedFill.isValid())
+        m_fillColor = loadedFill;
     m_hasFillColor = json["hasFillColor"].toBool(m_hasFillColor);
-    m_lineWidth = static_cast<float>(json["lineWidth"].toDouble(m_lineWidth));
-    m_lineStyle = static_cast<Qt::PenStyle>(json["lineStyle"].toInt(static_cast<int>(m_lineStyle)));
+    setLineWidth(static_cast<float>(
+        json["lineWidth"].toDouble(m_lineWidth)));
+    setLineStyle(static_cast<Qt::PenStyle>(
+        json["lineStyle"].toInt(static_cast<int>(m_lineStyle))));
     m_selected = json["selected"].toBool(m_selected);
     m_visible = json["visible"].toBool(m_visible);
-    m_opacityMultiplier = static_cast<float>(json["opacityMultiplier"].toDouble(m_opacityMultiplier));
+    setOpacityMultiplier(static_cast<float>(
+        json["opacityMultiplier"].toDouble(m_opacityMultiplier)));
     m_layerId = QUuid(json["layerId"].toString(m_layerId.toString()));
 
     m_shadowEnabled = json["shadowEnabled"].toBool(m_shadowEnabled);
-    m_shadowOffsetX = static_cast<float>(json["shadowOffsetX"].toDouble(m_shadowOffsetX));
-    m_shadowOffsetY = static_cast<float>(json["shadowOffsetY"].toDouble(m_shadowOffsetY));
-    m_shadowBlur = static_cast<float>(json["shadowBlur"].toDouble(m_shadowBlur));
-    m_shadowColor = QColor(json["shadowColor"].toString(m_shadowColor.name(QColor::HexArgb)));
-    m_rotationDegrees = static_cast<float>(json["rotationDegrees"].toDouble(m_rotationDegrees));
+    setShadowOffset(
+        static_cast<float>(json["shadowOffsetX"].toDouble(m_shadowOffsetX)),
+        static_cast<float>(json["shadowOffsetY"].toDouble(m_shadowOffsetY)));
+    setShadowBlur(static_cast<float>(
+        json["shadowBlur"].toDouble(m_shadowBlur)));
+    setShadowColor(QColor(
+        json["shadowColor"].toString(m_shadowColor.name(QColor::HexArgb))));
+    setRotationDegrees(static_cast<float>(
+        json["rotationDegrees"].toDouble(m_rotationDegrees)));
     if (json.contains(QStringLiteral("groupId")))
         m_groupId = QUuid(json["groupId"].toString());
     else
@@ -155,6 +214,7 @@ void DrawingPrimitive::applyCommonPropertiesTo(DrawingPrimitive *dst) const
         dst->clearFillColor();
     dst->setLineWidth(m_lineWidth);
     dst->setLineStyle(m_lineStyle);
+    dst->setOpacityMultiplier(m_opacityMultiplier);
     dst->setVisible(m_visible);
     dst->setRotationDegrees(m_rotationDegrees);
     dst->setGroupId(m_groupId);
@@ -164,10 +224,202 @@ void DrawingPrimitive::applyCommonPropertiesTo(DrawingPrimitive *dst) const
     dst->setShadowColor(m_shadowColor);
 }
 
+qsizetype DrawingPrimitive::serializedPointCount(const QJsonObject &json)
+{
+    const int typeValue = json.value(QStringLiteral("type")).toInt(-1);
+    switch (static_cast<PrimitiveType>(typeValue)) {
+    case PrimitiveType::Curve:
+    case PrimitiveType::BezierCurve:
+        return json.value(QStringLiteral("controlPoints")).isArray()
+                   ? json.value(QStringLiteral("controlPoints")).toArray().size()
+                   : 0;
+    case PrimitiveType::Spline:
+    case PrimitiveType::Polygon:
+        return json.value(QStringLiteral("points")).isArray()
+                   ? json.value(QStringLiteral("points")).toArray().size()
+                   : 0;
+    default:
+        return 0;
+    }
+}
+
+bool DrawingPrimitive::validateJson(const QJsonObject &json, QString *error)
+{
+    const auto fail = [error](const QString &reason) {
+        if (error)
+            *error = reason;
+        return false;
+    };
+
+    const QJsonValue typeValue = json.value(QStringLiteral("type"));
+    if (!typeValue.isDouble())
+        return fail(QStringLiteral("primitive type is missing or invalid"));
+    const double rawType = typeValue.toDouble();
+    if (!std::isfinite(rawType) || std::floor(rawType) != rawType
+        || rawType < static_cast<int>(PrimitiveType::Line)
+        || rawType > static_cast<int>(PrimitiveType::Image)) {
+        return fail(QStringLiteral("primitive type is unsupported"));
+    }
+
+    const auto validateOptionalNumber = [&json, &fail](const char *key) {
+        const QString field = QString::fromLatin1(key);
+        if (!json.contains(field))
+            return true;
+        const QJsonValue value = json.value(field);
+        if (!value.isDouble() || !std::isfinite(value.toDouble()))
+            return fail(field + QStringLiteral(" is not a finite number"));
+        return true;
+    };
+    for (const char *key : {"lineWidth", "opacityMultiplier",
+                            "rotationDegrees", "shadowOffsetX",
+                            "shadowOffsetY", "shadowBlur"}) {
+        if (!validateOptionalNumber(key))
+            return false;
+    }
+
+    if (json.contains(QStringLiteral("lineStyle"))) {
+        const QJsonValue styleValue = json.value(QStringLiteral("lineStyle"));
+        const double rawStyle = styleValue.toDouble(-1);
+        if (!styleValue.isDouble() || std::floor(rawStyle) != rawStyle
+            || rawStyle < static_cast<int>(Qt::NoPen)
+            || rawStyle > static_cast<int>(Qt::CustomDashLine)) {
+            return fail(QStringLiteral("lineStyle is invalid"));
+        }
+    }
+
+    for (const char *key : {"color", "fillColor", "shadowColor"}) {
+        const QString field = QString::fromLatin1(key);
+        if (json.contains(field)
+            && (!json.value(field).isString()
+                || !QColor(json.value(field).toString()).isValid())) {
+            return fail(field + QStringLiteral(" is invalid"));
+        }
+    }
+
+    const auto validateRequiredNumber =
+        [&json, &fail](const char *key, double minimum, double maximum) {
+            const QString field = QString::fromLatin1(key);
+            const QJsonValue value = json.value(field);
+            if (!value.isDouble() || !std::isfinite(value.toDouble()))
+                return fail(field + QStringLiteral(" is missing or invalid"));
+            const double number = value.toDouble();
+            if (number < minimum || number > maximum)
+                return fail(field + QStringLiteral(" is outside the supported range"));
+            return true;
+        };
+    const auto validateCoordinates =
+        [&validateRequiredNumber](std::initializer_list<const char *> keys) {
+            for (const char *key : keys) {
+                if (!validateRequiredNumber(
+                        key, -DrawingPrimitive::kMaxSerializedCoordinateMagnitude,
+                        DrawingPrimitive::kMaxSerializedCoordinateMagnitude)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+    const auto validateNonNegativeGeometry =
+        [&validateRequiredNumber](std::initializer_list<const char *> keys,
+                                  bool allowZero = true) {
+            const double minimum = allowZero
+                                       ? 0.0
+                                       : std::numeric_limits<double>::min();
+            for (const char *key : keys) {
+                if (!validateRequiredNumber(
+                        key, minimum,
+                        DrawingPrimitive::kMaxSerializedCoordinateMagnitude)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+    QString pointKey;
+    switch (static_cast<PrimitiveType>(static_cast<int>(rawType))) {
+    case PrimitiveType::Line:
+        if (!validateCoordinates({"startX", "startY", "endX", "endY"}))
+            return false;
+        return true;
+    case PrimitiveType::Rectangle:
+        if (!validateCoordinates(
+                {"topLeftX", "topLeftY", "bottomRightX", "bottomRightY"})) {
+            return false;
+        }
+        return true;
+    case PrimitiveType::Ellipse:
+        if (!validateCoordinates({"centerX", "centerY"})
+            || !validateNonNegativeGeometry({"radiusX", "radiusY"})) {
+            return false;
+        }
+        return true;
+    case PrimitiveType::Circle:
+        if (!validateCoordinates({"centerX", "centerY"})
+            || !validateNonNegativeGeometry({"radius"})) {
+            return false;
+        }
+        return true;
+    case PrimitiveType::Arc:
+        if (!validateCoordinates({"centerX", "centerY"})
+            || !validateNonNegativeGeometry({"radius"})
+            || !validateCoordinates({"startAngle", "endAngle"})) {
+            return false;
+        }
+        return true;
+    case PrimitiveType::Curve:
+    case PrimitiveType::BezierCurve:
+        pointKey = QStringLiteral("controlPoints");
+        break;
+    case PrimitiveType::Spline:
+    case PrimitiveType::Polygon:
+        pointKey = QStringLiteral("points");
+        break;
+    case PrimitiveType::Dimension:
+        if (!validateCoordinates({"startX", "startY", "endX", "endY"}))
+            return false;
+        return true;
+    case PrimitiveType::Text:
+        if (!validateCoordinates({"positionX", "positionY"}))
+            return false;
+        return true;
+    case PrimitiveType::Image:
+        if (!validateCoordinates({"posX", "posY"})
+            || !validateNonNegativeGeometry({"sizeX", "sizeY"}, false)
+            || !validateCoordinates({"rotation"})) {
+            return false;
+        }
+        return true;
+    default:
+        return true;
+    }
+
+    const QJsonValue pointsValue = json.value(pointKey);
+    if (!pointsValue.isArray())
+        return fail(QStringLiteral("primitive point array is missing or invalid"));
+    const QJsonArray points = pointsValue.toArray();
+    if (points.size() > kMaxSerializedPointsPerPrimitive)
+        return fail(QStringLiteral("primitive point array exceeds the limit"));
+
+    for (const QJsonValue &pointValue : points) {
+        if (!pointValue.isObject())
+            return fail(QStringLiteral("primitive point is not an object"));
+        const QJsonObject point = pointValue.toObject();
+        const QJsonValue x = point.value(QStringLiteral("x"));
+        const QJsonValue y = point.value(QStringLiteral("y"));
+        if (!x.isDouble() || !y.isDouble()
+            || !std::isfinite(x.toDouble()) || !std::isfinite(y.toDouble())
+            || std::abs(x.toDouble()) > kMaxSerializedCoordinateMagnitude
+            || std::abs(y.toDouble()) > kMaxSerializedCoordinateMagnitude) {
+            return fail(QStringLiteral("primitive point coordinate is invalid"));
+        }
+    }
+    return true;
+}
+
 std::unique_ptr<DrawingPrimitive> DrawingPrimitive::createFromJson(const QJsonObject& json)
 {
-    if (!json.contains("type")) {
-        qDebug() << "Error: JSON does not contain primitive type";
+    QString validationError;
+    if (!validateJson(json, &validationError)) {
+        qWarning() << "Error: Invalid serialized primitive:" << validationError;
         return nullptr;
     }
     
@@ -252,6 +504,18 @@ std::unique_ptr<DrawingPrimitive> DrawingPrimitive::createFromJson(const QJsonOb
     if (primitive) {
         primitive->fromJson(json);
     }
+
+    // Image JSON contains an embedded binary payload. Invalid image data must
+    // invalidate the primitive so a project load fails before replacing the
+    // current document instead of silently installing a blank image.
+    if (type == PrimitiveType::Image) {
+        auto *image = static_cast<ImagePrimitive *>(primitive.get());
+        if (!json.value(QStringLiteral("imageData")).isString()
+            || image->image().isNull()) {
+            qWarning() << "Error: Invalid serialized image primitive";
+            return nullptr;
+        }
+    }
     
     return primitive;
 }
@@ -261,4 +525,3 @@ void DrawingPrimitive::renderShadow(QPainter* painter) const
     if (!m_shadowEnabled || m_shadowBlur <= 0 || !painter) return;
     // Shadow rendering is handled per-primitive in their render() methods
 }
-

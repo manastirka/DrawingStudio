@@ -22,23 +22,23 @@ class MaskCache : public QObject
     
 public:
     struct CachedMask {
-        int id;
+        int id = 0;
         std::vector<QPointF> contour;
         QImage mask; // Full-resolution binary mask when available
-        float score;
-        float stability;
-        float predicted_iou;
-        float area_percent;
-        int imageWidth;   // Original image dimensions for scaling
-        int imageHeight;
+        float score = 0.0f;
+        float stability = 0.0f;
+        float predicted_iou = 0.0f;
+        float area_percent = 0.0f;
+        int imageWidth = 0;   // Original image dimensions for scaling
+        int imageHeight = 0;
     };
     
     struct CacheEntry {
         QString imageHash;
         QDateTime timestamp;
         std::vector<CachedMask> masks;
-        int originalWidth;
-        int originalHeight;
+        int originalWidth = 0;
+        int originalHeight = 0;
     };
     
     static MaskCache* instance();
@@ -58,7 +58,7 @@ public:
     void setCacheDirectory(const QString& dir);
     QString cacheDirectory() const { return m_cacheDir.absolutePath(); }
     
-    void setMaxCacheSize(qint64 bytes) { m_maxCacheSize = bytes; }
+    void setMaxCacheSize(qint64 bytes);
     qint64 maxCacheSize() const { return m_maxCacheSize; }
     
     void setEnabled(bool enabled) { m_enabled = enabled; }

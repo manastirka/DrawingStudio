@@ -71,6 +71,16 @@ target_include_directories(tst_YOLOIntegration PRIVATE ../include)
 target_link_libraries(tst_YOLOIntegration PRIVATE Qt6::Core Qt6::Gui Qt6::Network Qt6::Test)
 add_test(NAME tst_YOLOIntegration COMMAND tst_YOLOIntegration)
 
+# Atomic and validated SAM mask cache persistence
+add_executable(tst_MaskCache
+    tst_MaskCache.cpp
+    ../src/MaskCache.cpp
+    ../include/MaskCache.h
+)
+target_include_directories(tst_MaskCache PRIVATE ../include)
+target_link_libraries(tst_MaskCache PRIVATE Qt6::Core Qt6::Gui Qt6::Test)
+add_test(NAME tst_MaskCache COMMAND tst_MaskCache)
+
 # Line Extraction & DXF Export Test
 add_executable(tst_LineExtraction
     test_line_extraction.cpp
@@ -512,6 +522,16 @@ add_library(ds_test_canvas STATIC ${TEST_CANVAS_BUNDLE})
 target_include_directories(ds_test_canvas PUBLIC ../include)
 target_link_libraries(ds_test_canvas PUBLIC
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets)
+
+# Image resize handles, positive geometry, aspect lock, and persistence
+add_executable(tst_ImagePrimitiveResize tst_ImagePrimitiveResize.cpp)
+target_include_directories(tst_ImagePrimitiveResize PRIVATE ../include)
+target_link_libraries(tst_ImagePrimitiveResize PRIVATE
+    ds_test_canvas
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Test)
+add_test(NAME tst_ImagePrimitiveResize COMMAND tst_ImagePrimitiveResize)
+set_tests_properties(tst_ImagePrimitiveResize PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # LayerManager (light) — still needs MOC for LayerManager / DrawingPrimitive
 add_executable(tst_LayerManager

@@ -16,6 +16,14 @@ class QWidget;
 class ProjectFileService : public QObject {
     Q_OBJECT
 public:
+    // Keep JSON DOM construction and background primitive creation within a
+    // predictable memory/time budget. Save and load use the same limits so
+    // DrawingStudio never writes a project that it will refuse to reopen.
+    static constexpr qint64 kMaxProjectFileBytes = 256LL * 1024LL * 1024LL;
+    static constexpr qsizetype kMaxProjectLayers = 4096;
+    static constexpr qsizetype kMaxProjectPrimitives = 100000;
+    static constexpr qsizetype kMaxProjectGeometryPoints = 100000;
+
     struct Host {
         DrawingCanvas *canvas = nullptr;
         LayerManager *layerManager = nullptr;

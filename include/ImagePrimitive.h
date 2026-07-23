@@ -44,7 +44,7 @@ public:
   float rotation() const { return m_rotation; }
 
   // Resize handles
-  enum ResizeHandle {
+  enum ResizeHandle : int {
     TopLeft = 0,
     TopRight = 1,
     BottomLeft = 2,
@@ -53,6 +53,7 @@ public:
     Bottom = 5,
     Left = 6,
     Right = 7,
+    ResizeHandleCount = 8,
     None = -1
   };
 
@@ -169,15 +170,15 @@ public:
                                float tolerance = 10.0f) const;
 
   // Contour rendering smoothness
-  void setContourSmoothness(int level) { m_contourSmoothness = level; }
+  void setContourSmoothness(int level);
   int getContourSmoothness() const { return m_contourSmoothness; }
 
   // Mask refinement parameters (applied during extraction)
-  void setMaskFeather(int amount) { m_maskFeather = amount; }
+  void setMaskFeather(int amount);
   int getMaskFeather() const { return m_maskFeather; }
-  void setMaskBlur(int amount) { m_maskBlur = amount; }
+  void setMaskBlur(int amount);
   int getMaskBlur() const { return m_maskBlur; }
-  void setMaskExpand(int amount) { m_maskExpand = amount; }
+  void setMaskExpand(int amount);
   int getMaskExpand() const { return m_maskExpand; }
   void setMaskOverlayVisible(bool visible) { m_maskOverlayVisible = visible; }
   bool isMaskOverlayVisible() const { return m_maskOverlayVisible; }

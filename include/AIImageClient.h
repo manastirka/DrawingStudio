@@ -7,6 +7,7 @@
 #include <QNetworkAccessManager>
 #include <QProcess>
 #include <QTemporaryDir>
+#include <QtGlobal>
 #include <memory>
 
 /**
@@ -52,6 +53,10 @@ public:
 
     static QString defaultRemoteSdUrl();
 
+    static constexpr int kGenerationTimeoutMs = 180000;
+    static constexpr int kDownloadTimeoutMs = 60000;
+    static constexpr qsizetype kMaxNetworkResponseBytes = 128 * 1024 * 1024;
+
 signals:
     void started(const QString &message);
     void progress(const QString &message);
@@ -85,7 +90,11 @@ private:
     QString sizeSetting(const Request &req) const;
     QByteArray imageToPngBytes(const QImage &image) const;
     QString saveTempPng(const QImage &image, QString *errorOut);
-    void watchReply(QNetworkReply *reply, int timeoutMs = 180000);
+    static void applyRequestPolicy(QNetworkRequest &request,
+                                   bool allowSafeRedirects = false);
+    static QString networkReplyError(const QNetworkReply *reply);
+    void watchReply(QNetworkReply *reply, int timeoutMs = kGenerationTimeoutMs,
+                    qsizetype maxBytes = kMaxNetworkResponseBytes);
 
     QNetworkAccessManager *m_nam = nullptr;
     QProcess *m_process = nullptr;

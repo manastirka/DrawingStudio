@@ -392,7 +392,7 @@ void CurvePrimitive::fromJson(const QJsonObject& json)
     // Restore curve properties
     m_closed = json["closed"].toBool(false);
     m_filled = json["filled"].toBool(false);
-    m_curveType = json["curveType"].toInt(0);
+    setCurveType(json["curveType"].toInt(0));
     m_showControlPolygon = json["showControlPolygon"].toBool(false);
 }
 
@@ -698,7 +698,7 @@ void BezierCurvePrimitive::fromJson(const QJsonObject& json)
     // Restore bezier properties
     m_filled = json["filled"].toBool(false);
     m_showControlLines = json["showControlLines"].toBool(true);
-    m_subdivisionLevel = json["subdivisionLevel"].toInt(50);
+    setSubdivisionLevel(json["subdivisionLevel"].toInt(50));
     m_autoTangents = json["autoTangents"].toBool(false);
     m_symmetricHandles = json["symmetricHandles"].toBool(false);
 }
@@ -1056,10 +1056,9 @@ void SplinePrimitive::fromJson(const QJsonObject& json)
     // Restore spline properties
     m_closed = json["closed"].toBool(false);
     m_filled = json["filled"].toBool(false);
-    m_smoothness = json["smoothness"].toDouble(0.5);
-    m_interpolationType = json["interpolationType"].toInt(0);
-    m_tension = json["tension"].toDouble(0.5);
+    setSmoothness(json["smoothness"].toDouble(0.5));
+    setInterpolationType(json["interpolationType"].toInt(0));
+    setTension(json["tension"].toDouble(0.5));
     m_autoSmooth = json["autoSmooth"].toBool(false);
     m_showPoints = json["showPoints"].toBool(true);
 }
-

@@ -54,6 +54,32 @@ public:
     }
 };
 
+class ScopedSetting {
+public:
+    explicit ScopedSetting(QString key)
+        : m_key(std::move(key))
+    {
+        QSettings settings;
+        m_existed = settings.contains(m_key);
+        m_value = settings.value(m_key);
+    }
+
+    ~ScopedSetting()
+    {
+        QSettings settings;
+        if (m_existed)
+            settings.setValue(m_key, m_value);
+        else
+            settings.remove(m_key);
+        settings.sync();
+    }
+
+private:
+    QString m_key;
+    QVariant m_value;
+    bool m_existed = false;
+};
+
 class tst_AIImageClient : public QObject {
     Q_OBJECT
 
@@ -68,6 +94,8 @@ private slots:
     void testConnection_unknownProvider();
     void testConnection_invalidRemoteSdUrl();
     void testConnection_refusesRemoteSdRedirect();
+    void realClient_remoteSdRejectsRedirect();
+    void realClient_remoteSdRejectsOversizedResponse();
     void connectionTestDraftDoesNotPersist();
 };
 
@@ -243,6 +271,83 @@ void tst_AIImageClient::testConnection_refusesRemoteSdRedirect()
     QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 2000);
     QCOMPARE(spy.at(0).at(0).toBool(), false);
     QVERIFY(spy.at(0).at(1).toString().contains(QStringLiteral("Redirect")));
+}
+
+void tst_AIImageClient::realClient_remoteSdRejectsRedirect()
+{
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    connect(&server, &QTcpServer::newConnection, &server, [&server]() {
+        QTcpSocket *socket = server.nextPendingConnection();
+        QVERIFY(socket);
+        connect(socket, &QTcpSocket::readyRead, socket, [socket]() {
+            socket->readAll();
+            socket->write(
+                "HTTP/1.1 307 Temporary Redirect\r\n"
+                "Location: http://127.0.0.1:9/capture-prompt\r\n"
+                "Content-Length: 0\r\nConnection: close\r\n\r\n");
+            socket->disconnectFromHost();
+        });
+    });
+
+    ScopedSetting remoteUrlGuard(QStringLiteral("AI/remoteSDUrl"));
+    QSettings settings;
+    settings.setValue(
+        QStringLiteral("AI/remoteSDUrl"),
+        QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()));
+    settings.sync();
+
+    AIImageClient client;
+    QSignalSpy failSpy(&client, &AIImageClient::failed);
+    QSignalSpy doneSpy(&client, &AIImageClient::finished);
+    AIImageClient::Request request;
+    request.provider = QStringLiteral("remotesd");
+    request.prompt = QStringLiteral("private prompt must not be redirected");
+    client.generate(request);
+
+    QTRY_COMPARE_WITH_TIMEOUT(failSpy.count(), 1, 2000);
+    QCOMPARE(doneSpy.count(), 0);
+    QVERIFY(failSpy.at(0).at(0).toString().contains(QStringLiteral("Redirect")));
+    QVERIFY(!client.isBusy());
+}
+
+void tst_AIImageClient::realClient_remoteSdRejectsOversizedResponse()
+{
+    QTcpServer server;
+    QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+    connect(&server, &QTcpServer::newConnection, &server, [&server]() {
+        QTcpSocket *socket = server.nextPendingConnection();
+        QVERIFY(socket);
+        connect(socket, &QTcpSocket::readyRead, socket, [socket]() {
+            socket->readAll();
+            const qint64 declaredSize =
+                AIImageClient::kMaxNetworkResponseBytes + 1;
+            socket->write(
+                QByteArrayLiteral("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n")
+                + QByteArrayLiteral("Content-Length: ")
+                + QByteArray::number(declaredSize)
+                + QByteArrayLiteral("\r\nConnection: keep-alive\r\n\r\n"));
+            socket->flush();
+        });
+    });
+
+    ScopedSetting remoteUrlGuard(QStringLiteral("AI/remoteSDUrl"));
+    QSettings settings;
+    settings.setValue(
+        QStringLiteral("AI/remoteSDUrl"),
+        QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()));
+    settings.sync();
+
+    AIImageClient client;
+    QSignalSpy failSpy(&client, &AIImageClient::failed);
+    AIImageClient::Request request;
+    request.provider = QStringLiteral("remotesd");
+    request.prompt = QStringLiteral("oversized response test");
+    client.generate(request);
+
+    QTRY_COMPARE_WITH_TIMEOUT(failSpy.count(), 1, 2000);
+    QVERIFY(failSpy.at(0).at(0).toString().contains(QStringLiteral("exceeds")));
+    QVERIFY(!client.isBusy());
 }
 
 void tst_AIImageClient::connectionTestDraftDoesNotPersist()

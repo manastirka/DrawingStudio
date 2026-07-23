@@ -3,6 +3,7 @@
 #include "SAM2Client.h"
 #include <QBuffer>
 #include <QDebug>
+#include <QImageReader>
 #include <QPainter>
 #include <QPainterPath>
 #include <QTimer>
@@ -12,13 +13,77 @@
 
 // ImagePrimitive core + JSON (refactor E22).
 
+namespace {
+constexpr float kMinImageDimension = 1.0f;
+constexpr int kMaxContourSmoothness = 32;
+constexpr int kMaxMaskFeather = 30;
+constexpr int kMaxMaskBlur = 20;
+constexpr int kMaxMaskExpand = 20;
+constexpr qsizetype kMaxSerializedMaskCandidates = 4096;
+constexpr qsizetype kMaxSerializedContourPoints = 1000000;
+constexpr qsizetype kMaxSerializedImageBytes = 64 * 1024 * 1024;
+constexpr int kMaxSerializedImageDimension = 16384;
+constexpr qint64 kMaxSerializedImagePixels = 64LL * 1024LL * 1024LL;
+
+bool isValidResizeHandle(ImagePrimitive::ResizeHandle handle)
+{
+  const int index = static_cast<int>(handle);
+  return index >= static_cast<int>(ImagePrimitive::TopLeft)
+      && index < static_cast<int>(ImagePrimitive::ResizeHandleCount);
+}
+
+QImage decodeSerializedImage(const QJsonValue &value)
+{
+  if (!value.isString())
+    return {};
+
+  const QString encodedString = value.toString();
+  constexpr qsizetype kMaxBase64Characters =
+      ((kMaxSerializedImageBytes + 2) / 3) * 4;
+  if (encodedString.isEmpty()
+      || encodedString.size() > kMaxBase64Characters) {
+    return {};
+  }
+
+  const auto decodedResult = QByteArray::fromBase64Encoding(
+      encodedString.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
+  if (!decodedResult || decodedResult.decoded.isEmpty()
+      || decodedResult.decoded.size() > kMaxSerializedImageBytes) {
+    return {};
+  }
+
+  QBuffer buffer;
+  buffer.setData(decodedResult.decoded);
+  if (!buffer.open(QIODevice::ReadOnly))
+    return {};
+
+  QImageReader reader(&buffer, "PNG");
+  reader.setAutoTransform(false);
+  reader.setDecideFormatFromContent(false);
+  const QSize dimensions = reader.size();
+  if (!dimensions.isValid() || dimensions.width() <= 0
+      || dimensions.height() <= 0
+      || dimensions.width() > kMaxSerializedImageDimension
+      || dimensions.height() > kMaxSerializedImageDimension
+      || static_cast<qint64>(dimensions.width()) * dimensions.height()
+             > kMaxSerializedImagePixels) {
+    return {};
+  }
+
+  QImage image = reader.read();
+  if (image.isNull() || image.size() != dimensions)
+    return {};
+  return image;
+}
+}
+
 // --- ImagePrimitive ---
 ImagePrimitive::ImagePrimitive()
     : DrawingPrimitive(PrimitiveType::Image), m_position(0.0f, 0.0f),
       m_size(100.0f, 100.0f), m_rotation(0.0f), m_maintainAspectRatio(false),
       m_sam2Client(new SAM2Client(this)),
       m_detectionInProgress(false),
-      m_detectionScaleX(1.0f), m_detectionScaleY(1.0f), m_selectedMaskIndex(0),
+      m_detectionScaleX(1.0f), m_detectionScaleY(1.0f), m_selectedMaskIndex(-1),
       m_maskInverted(false), m_editMode(false), m_draggingControlPoint(-1),
       m_contourSmoothness(0), m_maskFeather(0), m_maskBlur(0), m_maskExpand(0),
       m_maskOverlayVisible(true) {
@@ -47,6 +112,7 @@ ImagePrimitive::ImagePrimitive(const QImage &image, const QVector2D &position,
       m_maskFeather(0), m_maskBlur(0), m_maskExpand(0),
       m_maskOverlayVisible(true) {
   setColor(Qt::black);
+  setSize(size);
 
   // Connect SAM2 signals
   connect(m_sam2Client, &SAM2Client::segmentationComplete, this,
@@ -303,7 +369,7 @@ std::vector<QVector2D> ImagePrimitive::getControlPoints() const {
 // --- setControlPointPosition ---
 void ImagePrimitive::setControlPointPosition(int index,
                                              const QVector2D &position) {
-  if (index >= 0 && index < 8) {
+  if (index >= 0 && index < static_cast<int>(ResizeHandleCount)) {
     resizeFromHandle(static_cast<ResizeHandle>(index), position);
   }
 }
@@ -315,6 +381,30 @@ void ImagePrimitive::setImage(const QImage &image) {
 }
 
 
+// --- setContourSmoothness ---
+void ImagePrimitive::setContourSmoothness(int level) {
+  m_contourSmoothness = std::clamp(level, 0, kMaxContourSmoothness);
+}
+
+
+// --- setMaskFeather ---
+void ImagePrimitive::setMaskFeather(int amount) {
+  m_maskFeather = std::clamp(amount, 0, kMaxMaskFeather);
+}
+
+
+// --- setMaskBlur ---
+void ImagePrimitive::setMaskBlur(int amount) {
+  m_maskBlur = std::clamp(amount, 0, kMaxMaskBlur);
+}
+
+
+// --- setMaskExpand ---
+void ImagePrimitive::setMaskExpand(int amount) {
+  m_maskExpand = std::clamp(amount, -kMaxMaskExpand, kMaxMaskExpand);
+}
+
+
 // --- setPosition ---
 void ImagePrimitive::setPosition(const QVector2D &position) {
   m_position = position;
@@ -323,15 +413,41 @@ void ImagePrimitive::setPosition(const QVector2D &position) {
 
 // --- setSize ---
 void ImagePrimitive::setSize(const QVector2D &size) {
-  if (m_maintainAspectRatio && !m_image.isNull()) {
-    float aspectRatio = static_cast<float>(m_image.width()) /
-                        static_cast<float>(m_image.height());
-    if (size.x() / aspectRatio != size.y()) {
-      m_size = QVector2D(size.x(), size.x() / aspectRatio);
-      return;
+  if (!std::isfinite(size.x()) || !std::isfinite(size.y()))
+    return;
+
+  QVector2D adjusted(std::max(kMinImageDimension, size.x()),
+                     std::max(kMinImageDimension, size.y()));
+  if (m_maintainAspectRatio && !m_image.isNull()
+      && m_image.width() > 0 && m_image.height() > 0) {
+    const float aspectRatio = static_cast<float>(m_image.width()) /
+                              static_cast<float>(m_image.height());
+    const float widthFromHeight = adjusted.y() * aspectRatio;
+    const float tolerance =
+        0.001f * std::max({1.0f, adjusted.x(), widthFromHeight});
+    if (std::abs(adjusted.x() - widthFromHeight) > tolerance) {
+      const float currentWidth = std::max(kMinImageDimension, m_size.x());
+      const float currentHeight = std::max(kMinImageDimension, m_size.y());
+      const float relativeWidthChange =
+          std::abs(adjusted.x() - currentWidth) / currentWidth;
+      const float relativeHeightChange =
+          std::abs(adjusted.y() - currentHeight) / currentHeight;
+      if (relativeHeightChange > relativeWidthChange)
+        adjusted.setX(widthFromHeight);
+      else
+        adjusted.setY(adjusted.x() / aspectRatio);
+    }
+
+    // Preserve the ratio even for extremely wide or tall source images while
+    // keeping both drawable dimensions above the minimum.
+    const float minimumHeight =
+        std::max(kMinImageDimension, kMinImageDimension / aspectRatio);
+    if (adjusted.y() < minimumHeight) {
+      adjusted.setY(minimumHeight);
+      adjusted.setX(minimumHeight * aspectRatio);
     }
   }
-  m_size = size;
+  m_size = adjusted;
 }
 
 
@@ -344,7 +460,7 @@ ImagePrimitive::ResizeHandle
 ImagePrimitive::getResizeHandleAt(const QVector2D &point,
                                   float tolerance) const {
   auto handles = getControlPoints();
-  for (int i = 0; i < 8; ++i) {
+  for (int i = 0; i < static_cast<int>(ResizeHandleCount); ++i) {
     if ((point - handles[i]).length() <= tolerance) {
       return static_cast<ResizeHandle>(i);
     }
@@ -355,16 +471,17 @@ ImagePrimitive::getResizeHandleAt(const QVector2D &point,
 
 // --- getHandlePosition ---
 QVector2D ImagePrimitive::getHandlePosition(ResizeHandle handle) const {
-  auto handles = getControlPoints();
-  if (handle >= 0 && handle < 8) {
-    return handles[handle];
-  }
-  return QVector2D();
+  if (!isValidResizeHandle(handle))
+    return QVector2D();
+  const auto handles = getControlPoints();
+  return handles[static_cast<size_t>(handle)];
 }
 
 
 // --- getResizeHandleRect ---
 QRectF ImagePrimitive::getResizeHandleRect(ResizeHandle handle) const {
+  if (!isValidResizeHandle(handle))
+    return QRectF();
   QVector2D pos = getHandlePosition(handle);
   return QRectF(pos.x() - HANDLE_SIZE / 2.0f, pos.y() - HANDLE_SIZE / 2.0f,
                 HANDLE_SIZE, HANDLE_SIZE);
@@ -374,73 +491,108 @@ QRectF ImagePrimitive::getResizeHandleRect(ResizeHandle handle) const {
 // --- resizeFromHandle ---
 void ImagePrimitive::resizeFromHandle(ResizeHandle handle,
                                       const QVector2D &newPosition) {
-  float aspectRatio = m_maintainAspectRatio && !m_image.isNull()
-                          ? static_cast<float>(m_image.width()) /
-                                static_cast<float>(m_image.height())
-                          : 0.0f;
+  if (!isValidResizeHandle(handle) || !std::isfinite(newPosition.x())
+      || !std::isfinite(newPosition.y()) || !std::isfinite(m_position.x())
+      || !std::isfinite(m_position.y()) || !std::isfinite(m_size.x())
+      || !std::isfinite(m_size.y()))
+    return;
 
-  QVector2D newPos = m_position;
-  QVector2D newSize = m_size;
+  const float originalWidth = std::max(kMinImageDimension, m_size.x());
+  const float originalHeight = std::max(kMinImageDimension, m_size.y());
+  float left = m_position.x();
+  float top = m_position.y();
+  float right = left + originalWidth;
+  float bottom = top + originalHeight;
 
   switch (handle) {
   case TopLeft:
-    newSize = QVector2D(m_position.x() + m_size.x() - newPosition.x(),
-                        m_position.y() + m_size.y() - newPosition.y());
-    newPos = newPosition;
+    left = std::min(newPosition.x(), right - kMinImageDimension);
+    top = std::min(newPosition.y(), bottom - kMinImageDimension);
     break;
   case TopRight:
-    newSize = QVector2D(newPosition.x() - m_position.x(),
-                        m_position.y() + m_size.y() - newPosition.y());
-    newPos = QVector2D(m_position.x(), newPosition.y());
+    right = std::max(newPosition.x(), left + kMinImageDimension);
+    top = std::min(newPosition.y(), bottom - kMinImageDimension);
     break;
   case BottomLeft:
-    newSize = QVector2D(m_position.x() + m_size.x() - newPosition.x(),
-                        newPosition.y() - m_position.y());
-    newPos = QVector2D(newPosition.x(), m_position.y());
+    left = std::min(newPosition.x(), right - kMinImageDimension);
+    bottom = std::max(newPosition.y(), top + kMinImageDimension);
     break;
   case BottomRight:
-    newSize = QVector2D(newPosition.x() - m_position.x(),
-                        newPosition.y() - m_position.y());
+    right = std::max(newPosition.x(), left + kMinImageDimension);
+    bottom = std::max(newPosition.y(), top + kMinImageDimension);
     break;
   case Top:
-    newSize =
-        QVector2D(m_size.x(), m_position.y() + m_size.y() - newPosition.y());
-    newPos = QVector2D(m_position.x(), newPosition.y());
+    top = std::min(newPosition.y(), bottom - kMinImageDimension);
     break;
   case Bottom:
-    newSize = QVector2D(m_size.x(), newPosition.y() - m_position.y());
+    bottom = std::max(newPosition.y(), top + kMinImageDimension);
     break;
   case Left:
-    newSize =
-        QVector2D(m_position.x() + m_size.x() - newPosition.x(), m_size.y());
-    newPos = QVector2D(newPosition.x(), m_position.y());
+    left = std::min(newPosition.x(), right - kMinImageDimension);
     break;
   case Right:
-    newSize = QVector2D(newPosition.x() - m_position.x(), m_size.y());
+    right = std::max(newPosition.x(), left + kMinImageDimension);
     break;
   default:
     return;
   }
 
-  // Maintain aspect ratio if needed
-  if (m_maintainAspectRatio && aspectRatio > 0.0f) {
+  const float aspectRatio =
+      m_maintainAspectRatio && !m_image.isNull() && m_image.height() > 0
+          ? static_cast<float>(m_image.width()) /
+                static_cast<float>(m_image.height())
+          : 0.0f;
+  if (aspectRatio > 0.0f) {
+    float width = right - left;
+    float height = bottom - top;
     if (handle == Top || handle == Bottom) {
-      newSize.setX(newSize.y() * aspectRatio);
+      right = left + height * aspectRatio;
     } else if (handle == Left || handle == Right) {
-      newSize.setY(newSize.x() / aspectRatio);
+      bottom = top + width / aspectRatio;
     } else {
-      // Corner handles - maintain aspect based on which dimension changed more
-      if (std::abs(newSize.x() - m_size.x()) >
-          std::abs(newSize.y() - m_size.y())) {
-        newSize.setY(newSize.x() / aspectRatio);
+      const float relativeWidthChange =
+          std::abs(width - originalWidth) / originalWidth;
+      const float relativeHeightChange =
+          std::abs(height - originalHeight) / originalHeight;
+      if (relativeWidthChange >= relativeHeightChange) {
+        height = width / aspectRatio;
+        if (handle == TopLeft || handle == TopRight)
+          top = bottom - height;
+        else
+          bottom = top + height;
       } else {
-        newSize.setX(newSize.y() * aspectRatio);
+        width = height * aspectRatio;
+        if (handle == TopLeft || handle == BottomLeft)
+          left = right - width;
+        else
+          right = left + width;
       }
+    }
+
+    // If the image has an extreme aspect ratio, satisfying one dimension's
+    // minimum can otherwise make the other dimension sub-pixel. Grow both
+    // dimensions together and retain the edge opposite the dragged handle.
+    height = right > left ? (right - left) / aspectRatio : 0.0f;
+    const float minimumHeight =
+        std::max(kMinImageDimension, kMinImageDimension / aspectRatio);
+    if (height < minimumHeight) {
+      height = minimumHeight;
+      const float width = height * aspectRatio;
+      if (handle == TopLeft || handle == BottomLeft || handle == Left)
+        left = right - width;
+      else
+        right = left + width;
+
+      if (handle == TopLeft || handle == TopRight || handle == Top)
+        top = bottom - height;
+      else
+        bottom = top + height;
     }
   }
 
-  m_position = newPos;
-  m_size = newSize;
+  m_position = QVector2D(left, top);
+  m_size = QVector2D(std::max(kMinImageDimension, right - left),
+                     std::max(kMinImageDimension, bottom - top));
 }
 
 
@@ -454,6 +606,13 @@ QJsonObject ImagePrimitive::toJson() const {
   json["sizeX"] = m_size.x();
   json["sizeY"] = m_size.y();
   json["rotation"] = m_rotation;
+  json["maintainAspectRatio"] = m_maintainAspectRatio;
+  json["contourSmoothness"] = m_contourSmoothness;
+  json["maskFeather"] = m_maskFeather;
+  json["maskBlur"] = m_maskBlur;
+  json["maskExpand"] = m_maskExpand;
+  json["maskOverlayVisible"] = m_maskOverlayVisible;
+  json["maskInverted"] = m_maskInverted;
 
   // Save image as base64 PNG
   QByteArray imageData;
@@ -496,8 +655,14 @@ QJsonObject ImagePrimitive::toJson() const {
       candidatesArray.append(candObj);
     }
     json["maskCandidates"] = candidatesArray;
-    json["selectedMaskIndex"] = m_selectedMaskIndex;
-    json["maskInverted"] = m_maskInverted;
+  }
+
+  json["selectedMaskIndex"] = m_selectedMaskIndex;
+  if (!m_selectedMaskIndices.empty()) {
+    QJsonArray selectedArray;
+    for (int index : m_selectedMaskIndices)
+      selectedArray.append(index);
+    json["selectedMaskIndices"] = selectedArray;
   }
 
   return json;
@@ -508,52 +673,118 @@ QJsonObject ImagePrimitive::toJson() const {
 void ImagePrimitive::fromJson(const QJsonObject &json) {
   DrawingPrimitive::fromJson(json);
 
-  // Restore position and size
+  // Restore geometry. Apply the saved size only after the image and aspect
+  // lock are available so invalid dimensions are clamped consistently.
   m_position = QVector2D(json["posX"].toDouble(), json["posY"].toDouble());
-  m_size = QVector2D(json["sizeX"].toDouble(), json["sizeY"].toDouble());
+  const QVector2D savedSize(json["sizeX"].toDouble(),
+                            json["sizeY"].toDouble());
   m_rotation = json["rotation"].toDouble();
 
   // Restore image from base64
-  QByteArray imageData =
-      QByteArray::fromBase64(json["imageData"].toString().toUtf8());
-  m_image.loadFromData(imageData, "PNG");
+  m_image = decodeSerializedImage(json["imageData"]);
+  m_maintainAspectRatio = json["maintainAspectRatio"].toBool(false);
+  setSize(savedSize);
+
+  // Optional mask data must be reset before it is restored. fromJson() is
+  // also used for in-place undo/redo, where retaining an omitted old value
+  // would leak mask state from a later snapshot.
+  m_detectedSubject = DetectedSubject{};
+  m_maskCandidates.clear();
+  m_selectedMaskIndex = -1;
+  m_selectedMaskIndices.clear();
+  m_maskInverted = json["maskInverted"].toBool(false);
+  setContourSmoothness(json["contourSmoothness"].toInt(0));
+  setMaskFeather(json["maskFeather"].toInt(0));
+  setMaskBlur(json["maskBlur"].toInt(0));
+  setMaskExpand(json["maskExpand"].toInt(0));
+  m_maskOverlayVisible = json["maskOverlayVisible"].toBool(true);
 
   // Restore mask contour if exists
-  if (json.contains("maskContour")) {
-    QJsonArray contourArray = json["maskContour"].toArray();
-    m_detectedSubject.contour.clear();
-    for (const QJsonValue &pointValue : contourArray) {
-      QJsonObject pointObj = pointValue.toObject();
+  if (json["maskContour"].isArray()) {
+    const QJsonArray contourArray = json["maskContour"].toArray();
+    const qsizetype pointCount =
+        std::min(contourArray.size(), kMaxSerializedContourPoints);
+    m_detectedSubject.contour.reserve(static_cast<size_t>(pointCount));
+    for (qsizetype i = 0; i < pointCount; ++i) {
+      const QJsonValue pointValue = contourArray.at(i);
+      if (!pointValue.isObject())
+        continue;
+      const QJsonObject pointObj = pointValue.toObject();
+      if (!pointObj["x"].isDouble() || !pointObj["y"].isDouble())
+        continue;
       m_detectedSubject.contour.push_back(
           QPointF(pointObj["x"].toDouble(), pointObj["y"].toDouble()));
     }
   }
 
   // Restore mask candidates and selection so cycling still works after reload
-  if (json.contains("maskCandidates")) {
-    QJsonArray candidatesArray = json["maskCandidates"].toArray();
-    m_maskCandidates.clear();
-    for (const QJsonValue &candValue : candidatesArray) {
-      QJsonObject candObj = candValue.toObject();
-      MaskCandidate candidate;
+  if (json["maskCandidates"].isArray()) {
+    const QJsonArray candidatesArray = json["maskCandidates"].toArray();
+    const qsizetype candidateCount =
+        std::min(candidatesArray.size(), kMaxSerializedMaskCandidates);
+    m_maskCandidates.reserve(static_cast<size_t>(candidateCount));
+    for (qsizetype i = 0; i < candidateCount; ++i) {
+      const QJsonValue candValue = candidatesArray.at(i);
+      if (!candValue.isObject())
+        continue;
+      const QJsonObject candObj = candValue.toObject();
+      MaskCandidate candidate{};
       candidate.id = candObj["id"].toInt();
       candidate.score = candObj["score"].toDouble();
       candidate.stability = candObj["stability"].toDouble();
       candidate.predicted_iou = candObj["predicted_iou"].toDouble();
       candidate.area_percent = candObj["area_percent"].toDouble();
-      QJsonArray candContour = candObj["contour"].toArray();
-      for (const QJsonValue &pointValue : candContour) {
-        QJsonObject pointObj = pointValue.toObject();
+      const QJsonArray candContour = candObj["contour"].toArray();
+      const qsizetype contourPointCount =
+          std::min(candContour.size(), kMaxSerializedContourPoints);
+      candidate.contour.reserve(static_cast<size_t>(contourPointCount));
+      for (qsizetype pointIndex = 0; pointIndex < contourPointCount;
+           ++pointIndex) {
+        const QJsonValue pointValue = candContour.at(pointIndex);
+        if (!pointValue.isObject())
+          continue;
+        const QJsonObject pointObj = pointValue.toObject();
+        if (!pointObj["x"].isDouble() || !pointObj["y"].isDouble())
+          continue;
         candidate.contour.push_back(
             QPointF(pointObj["x"].toDouble(), pointObj["y"].toDouble()));
       }
       m_maskCandidates.push_back(candidate);
     }
-
-    m_selectedMaskIndex = json.contains("selectedMaskIndex")
-                              ? json["selectedMaskIndex"].toInt()
-                              : (m_maskCandidates.empty() ? -1 : 0);
-    m_maskInverted = json["maskInverted"].toBool(false);
   }
-}
 
+  const int requestedSelection = json.contains("selectedMaskIndex")
+                                     ? json["selectedMaskIndex"].toInt(-1)
+                                     : (m_maskCandidates.empty() ? -1 : 0);
+  if (requestedSelection == -1) {
+    m_selectedMaskIndex = -1;
+  } else if (requestedSelection >= 0
+             && requestedSelection
+                    < static_cast<int>(m_maskCandidates.size())) {
+    m_selectedMaskIndex = requestedSelection;
+  } else {
+    m_selectedMaskIndex = m_maskCandidates.empty() ? -1 : 0;
+  }
+
+  if (json["selectedMaskIndices"].isArray()) {
+    const QJsonArray selectedArray = json["selectedMaskIndices"].toArray();
+    const qsizetype selectionCount =
+        std::min(selectedArray.size(), kMaxSerializedMaskCandidates);
+    for (qsizetype i = 0; i < selectionCount; ++i) {
+      const QJsonValue selectedValue = selectedArray.at(i);
+      const int index = selectedValue.toInt(-1);
+      if (index < 0 || index >= static_cast<int>(m_maskCandidates.size())
+          || std::find(m_selectedMaskIndices.begin(),
+                       m_selectedMaskIndices.end(), index)
+                 != m_selectedMaskIndices.end()) {
+        continue;
+      }
+      m_selectedMaskIndices.push_back(index);
+    }
+  }
+
+  // Legacy files may contain candidates but no separately saved primary
+  // contour. Reconstruct it so extraction remains immediately available.
+  if (m_detectedSubject.contour.empty() && m_selectedMaskIndex >= 0)
+    m_detectedSubject.contour = m_maskCandidates[m_selectedMaskIndex].contour;
+}

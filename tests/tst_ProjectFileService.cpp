@@ -1,5 +1,6 @@
 #include "CommandManager.h"
 #include "DrawingPrimitive.h"
+#include "ImagePrimitive.h"
 #include "Layer.h"
 #include "LayerManager.h"
 #include "ProjectFileService.h"
@@ -19,8 +20,14 @@ class tst_ProjectFileService : public QObject {
 private slots:
     void saveWritesLayersAndPrimitives();
     void saveFailureDoesNotUpdateSession();
+    void excessiveLayerSaveDoesNotOverwriteFile();
     void loadRoundTripRestoresLine();
     void corruptLoadPreservesCurrentDocument();
+    void oversizedLoadPreservesCurrentDocument();
+    void excessiveLayerCountPreservesCurrentDocument();
+    void excessivePrimitiveCountPreservesCurrentDocument();
+    void excessiveGeometryPointCountPreservesCurrentDocument();
+    void invalidEmbeddedImagePreservesCurrentDocument();
     void recoveryLoadDoesNotTouchSessionCallbacks();
     void silentSave_doesNotTouchSessionCallbacks();
 };
@@ -79,6 +86,39 @@ void tst_ProjectFileService::saveFailureDoesNotUpdateSession()
     QCOMPARE(recentCalls, 0);
     QVERIFY(status.contains(QStringLiteral("failed"), Qt::CaseInsensitive));
     QVERIFY(QFileInfo(dir.path()).isDir());
+}
+
+void tst_ProjectFileService::excessiveLayerSaveDoesNotOverwriteFile()
+{
+    LayerManager layers;
+    while (layers.layerCount()
+           <= static_cast<size_t>(ProjectFileService::kMaxProjectLayers)) {
+        layers.createLayer(QStringLiteral("Layer"));
+    }
+
+    int currentFileCalls = 0;
+    QString status;
+    ProjectFileService svc;
+    ProjectFileService::Host host;
+    host.layerManager = &layers;
+    host.setCurrentFile = [&](const QString &) { ++currentFileCalls; };
+    host.setStatusText = [&](const QString &message) { status = message; };
+    svc.setHost(host);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("existing.drawing"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write("keep"), qint64(4));
+    file.close();
+
+    QVERIFY(!svc.saveToFile(path));
+    QCOMPARE(currentFileCalls, 0);
+    QVERIFY(status.contains(QStringLiteral("layer limit"), Qt::CaseInsensitive));
+
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), QByteArray("keep"));
 }
 
 void tst_ProjectFileService::loadRoundTripRestoresLine()
@@ -153,6 +193,208 @@ void tst_ProjectFileService::corruptLoadPreservesCurrentDocument()
     QVERIFY(line);
     QCOMPARE(line->startPoint(), QVector2D(10, 11));
     QCOMPARE(line->endPoint(), QVector2D(12, 13));
+}
+
+void tst_ProjectFileService::oversizedLoadPreservesCurrentDocument()
+{
+    LayerManager layers;
+    layers.addPrimitiveToActiveLayer(
+        std::make_unique<LinePrimitive>(QVector2D(1, 2), QVector2D(3, 4)));
+
+    QString status;
+    ProjectFileService svc;
+    ProjectFileService::Host host;
+    host.layerManager = &layers;
+    host.setStatusText = [&](const QString &message) { status = message; };
+    svc.setHost(host);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("oversized.drawing"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QVERIFY(file.resize(ProjectFileService::kMaxProjectFileBytes + 1));
+    file.close();
+
+    QVERIFY(!svc.loadFromFile(path, /*waitUntilLoaded=*/true));
+    QVERIFY(status.contains(QStringLiteral("size limit"), Qt::CaseInsensitive));
+    QCOMPARE(layers.getAllPrimitives().size(), static_cast<size_t>(1));
+}
+
+void tst_ProjectFileService::excessiveLayerCountPreservesCurrentDocument()
+{
+    LayerManager layers;
+    layers.addPrimitiveToActiveLayer(
+        std::make_unique<LinePrimitive>(QVector2D(1, 2), QVector2D(3, 4)));
+
+    QString status;
+    ProjectFileService svc;
+    ProjectFileService::Host host;
+    host.layerManager = &layers;
+    host.setStatusText = [&](const QString &message) { status = message; };
+    svc.setHost(host);
+
+    QJsonArray incomingLayers;
+    QJsonObject layer;
+    layer["name"] = QStringLiteral("Layer");
+    layer["primitives"] = QJsonArray();
+    for (qsizetype i = 0; i <= ProjectFileService::kMaxProjectLayers; ++i)
+        incomingLayers.append(layer);
+
+    QJsonObject root;
+    root["format"] = QStringLiteral("DrawingStudio");
+    root["version"] = 1;
+    root["layers"] = incomingLayers;
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("too-many-layers.drawing"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray payload = QJsonDocument(root).toJson();
+    QCOMPARE(file.write(payload), static_cast<qint64>(payload.size()));
+    file.close();
+
+    QVERIFY(!svc.loadFromFile(path, /*waitUntilLoaded=*/true));
+    QVERIFY(status.contains(QStringLiteral("layer limit"), Qt::CaseInsensitive));
+    QCOMPARE(layers.getAllPrimitives().size(), static_cast<size_t>(1));
+}
+
+void tst_ProjectFileService::excessivePrimitiveCountPreservesCurrentDocument()
+{
+    LayerManager layers;
+    layers.addPrimitiveToActiveLayer(
+        std::make_unique<LinePrimitive>(QVector2D(1, 2), QVector2D(3, 4)));
+
+    QString status;
+    ProjectFileService svc;
+    ProjectFileService::Host host;
+    host.layerManager = &layers;
+    host.setStatusText = [&](const QString &message) { status = message; };
+    svc.setHost(host);
+
+    QJsonArray incomingPrimitives;
+    for (qsizetype i = 0; i <= ProjectFileService::kMaxProjectPrimitives; ++i)
+        incomingPrimitives.append(QJsonObject());
+
+    QJsonObject root;
+    root["format"] = QStringLiteral("DrawingStudio");
+    root["version"] = 1;
+    root["primitives"] = incomingPrimitives;
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path =
+        dir.filePath(QStringLiteral("too-many-primitives.drawing"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray payload = QJsonDocument(root).toJson();
+    QCOMPARE(file.write(payload), static_cast<qint64>(payload.size()));
+    file.close();
+
+    QVERIFY(!svc.loadFromFile(path, /*waitUntilLoaded=*/true));
+    QVERIFY(status.contains(QStringLiteral("primitive limit"),
+                            Qt::CaseInsensitive));
+    QCOMPARE(layers.getAllPrimitives().size(), static_cast<size_t>(1));
+}
+
+void tst_ProjectFileService::excessiveGeometryPointCountPreservesCurrentDocument()
+{
+    LayerManager layers;
+    layers.addPrimitiveToActiveLayer(
+        std::make_unique<LinePrimitive>(QVector2D(1, 2), QVector2D(3, 4)));
+
+    QString status;
+    ProjectFileService svc;
+    ProjectFileService::Host host;
+    host.layerManager = &layers;
+    host.setStatusText = [&](const QString &message) { status = message; };
+    svc.setHost(host);
+
+    QJsonObject point;
+    point["x"] = 0.0;
+    point["y"] = 0.0;
+    QJsonArray points;
+    for (qsizetype i = 0;
+         i < DrawingPrimitive::kMaxSerializedPointsPerPrimitive; ++i) {
+        points.append(point);
+    }
+
+    QJsonObject polygon;
+    polygon["type"] = static_cast<int>(PrimitiveType::Polygon);
+    polygon["points"] = points;
+    QJsonArray primitives;
+    const qsizetype polygonCount =
+        ProjectFileService::kMaxProjectGeometryPoints
+            / DrawingPrimitive::kMaxSerializedPointsPerPrimitive
+        + 1;
+    for (qsizetype i = 0; i < polygonCount; ++i)
+        primitives.append(polygon);
+
+    QJsonObject root;
+    root["format"] = QStringLiteral("DrawingStudio");
+    root["version"] = 1;
+    root["primitives"] = primitives;
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path =
+        dir.filePath(QStringLiteral("too-many-geometry-points.drawing"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray payload = QJsonDocument(root).toJson();
+    QCOMPARE(file.write(payload), static_cast<qint64>(payload.size()));
+    file.close();
+
+    QVERIFY(!svc.loadFromFile(path, /*waitUntilLoaded=*/true));
+    QVERIFY(status.contains(QStringLiteral("geometry point limit"),
+                            Qt::CaseInsensitive));
+    QCOMPARE(layers.getAllPrimitives().size(), static_cast<size_t>(1));
+}
+
+void tst_ProjectFileService::invalidEmbeddedImagePreservesCurrentDocument()
+{
+    LayerManager layers;
+    layers.addPrimitiveToActiveLayer(
+        std::make_unique<LinePrimitive>(QVector2D(1, 2), QVector2D(3, 4)));
+
+    QString status;
+    ProjectFileService svc;
+    ProjectFileService::Host host;
+    host.layerManager = &layers;
+    host.setStatusText = [&](const QString &message) { status = message; };
+    svc.setHost(host);
+
+    ImagePrimitive image(QImage(2, 2, QImage::Format_ARGB32), QVector2D(),
+                         QVector2D(2, 2));
+    QJsonObject imageJson = image.toJson();
+    imageJson["imageData"] = QStringLiteral("invalid@@base64");
+    QJsonArray primitives;
+    primitives.append(imageJson);
+    QJsonObject layer;
+    layer["name"] = QStringLiteral("Incoming");
+    layer["primitives"] = primitives;
+    QJsonArray incomingLayers;
+    incomingLayers.append(layer);
+    QJsonObject root;
+    root["format"] = QStringLiteral("DrawingStudio");
+    root["version"] = 1;
+    root["layers"] = incomingLayers;
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("invalid-image.drawing"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    const QByteArray payload = QJsonDocument(root).toJson();
+    QCOMPARE(file.write(payload), static_cast<qint64>(payload.size()));
+    file.close();
+
+    QVERIFY(!svc.loadFromFile(path, /*waitUntilLoaded=*/true));
+    QVERIFY(status.contains(QStringLiteral("failed"), Qt::CaseInsensitive));
+    const auto primitivesAfter = layers.getAllPrimitives();
+    QCOMPARE(primitivesAfter.size(), static_cast<size_t>(1));
+    QVERIFY(dynamic_cast<LinePrimitive *>(primitivesAfter.front()));
 }
 
 void tst_ProjectFileService::recoveryLoadDoesNotTouchSessionCallbacks()

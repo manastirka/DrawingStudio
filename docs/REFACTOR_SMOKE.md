@@ -56,15 +56,22 @@ also require the launch flag `--automation-allow-filesystem`.
 
 | Check | Result | When |
 |-------|--------|------|
-| `cmake --build` + `ctest` (30 tests) | PASS | 2026-07-22 |
+| `cmake --build` + `ctest` (32 tests) | PASS | 2026-07-22 |
 | Command API auth, CORS, body/catalog/batch limits | covered by `tst_CommandServer` | 2026-07-22 |
 | Command catalog/dispatcher parity and required-parameter validation | covered by `tst_CommandServer` + `tst_DrawingCommandDispatcher` | 2026-07-22 |
 | Object align/distribute | covered by `tst_ObjectLayoutOps` | 2026-07-15 |
 | AI connection missing-key paths | covered by `tst_AIImageClient` | 2026-07-15 |
 | AI connection-test drafts remain unsaved; Remote SD URL validation/default | covered by `tst_AIImageClient` | 2026-07-22 |
+| AI generation redirect refusal, deadlines, and 128 MiB response cap | covered by `tst_AIImageClient` | 2026-07-22 |
 | Authenticated command server smoke script | _run after app rebuild_ | — |
 | SAM2 loopback binding, bearer auth, protocol marker, and request limit | covered by SAM2 security tests | 2026-07-22 |
-| Atomic project save, corrupt-load preservation, and recovery isolation | covered by `tst_ProjectFileService` | 2026-07-22 |
+| Atomic, validated SAM mask cache and corrupt-entry removal | covered by `tst_MaskCache` | 2026-07-22 |
+| Image resize bounds, aspect lock, mask-state restoration, and bounded refinements | covered by `tst_ImagePrimitiveResize` | 2026-07-22 |
+| Strict/bounded embedded PNG decoding and corrupt-image load preservation | covered by `tst_ImagePrimitiveResize` + `tst_ProjectFileService` | 2026-07-23 |
+| Bounded vector geometry, coordinate schema validation, and curve parameter clamps | covered by `tst_PrimitiveRoundTrip` + `tst_ProjectFileService` | 2026-07-23 |
+| Common style/transform bounds and malformed style rejection | covered by `tst_PrimitiveRoundTrip` | 2026-07-23 |
+| Finite/range-checked scalar geometry for shapes, dimensions, text, and images | covered by `tst_PrimitiveRoundTrip` | 2026-07-23 |
+| Atomic/bounded project persistence, rejected-load preservation, and recovery isolation | covered by `tst_ProjectFileService` | 2026-07-22 |
 | Primitive JSON round-trip | covered by `tst_PrimitiveRoundTrip` | 2026-07-14 |
 | Silent autosave session callbacks | covered by `tst_ProjectFileService` | 2026-07-14 |
 | Manual UI (items 1–8) | _operator_ | — |

@@ -20,6 +20,63 @@
 #include <memory>
 #include <vector>
 
+namespace {
+QString validateProjectBudgets(const QJsonObject &json, bool hasLayers)
+{
+    qint64 totalPrimitives = 0;
+    qint64 totalGeometryPoints = 0;
+    const auto validatePrimitives =
+        [&totalPrimitives, &totalGeometryPoints](const QJsonArray &primitives) {
+            totalPrimitives += primitives.size();
+            if (totalPrimitives > ProjectFileService::kMaxProjectPrimitives)
+                return QStringLiteral("project exceeds the primitive limit");
+
+            for (const QJsonValue &primitiveValue : primitives) {
+                if (!primitiveValue.isObject())
+                    return QStringLiteral("invalid primitive entry");
+                const QJsonObject primitive = primitiveValue.toObject();
+                QString primitiveError;
+                if (!DrawingPrimitive::validateJson(primitive, &primitiveError))
+                    return QStringLiteral("invalid primitive: ") + primitiveError;
+                totalGeometryPoints +=
+                    DrawingPrimitive::serializedPointCount(primitive);
+                if (totalGeometryPoints
+                    > ProjectFileService::kMaxProjectGeometryPoints) {
+                    return QStringLiteral(
+                        "project exceeds the geometry point limit");
+                }
+            }
+            return QString();
+        };
+
+    if (!hasLayers) {
+        const QJsonArray primitives = json[QStringLiteral("primitives")].toArray();
+        return validatePrimitives(primitives);
+    }
+
+    const QJsonArray layers = json[QStringLiteral("layers")].toArray();
+    if (layers.size() > ProjectFileService::kMaxProjectLayers)
+        return QStringLiteral("project exceeds the layer limit");
+
+    for (const QJsonValue &layerValue : layers) {
+        if (!layerValue.isObject())
+            return QStringLiteral("invalid layer entry");
+
+        const QJsonObject layer = layerValue.toObject();
+        if (layer.contains(QStringLiteral("primitives"))
+            && !layer.value(QStringLiteral("primitives")).isArray()) {
+            return QStringLiteral("invalid layer primitives");
+        }
+
+        const QString primitiveError = validatePrimitives(
+            layer.value(QStringLiteral("primitives")).toArray());
+        if (!primitiveError.isEmpty())
+            return primitiveError;
+    }
+    return {};
+}
+} // namespace
+
 ProjectFileService::ProjectFileService(QObject *parent)
     : QObject(parent)
 {
@@ -45,9 +102,20 @@ bool ProjectFileService::saveToFile(const QString& fileName, bool updateSession)
     // Serialize all layers and their primitives
     QJsonArray layersArray;
     if (m_host.layerManager) {
+        if (m_host.layerManager->layerCount()
+            > static_cast<size_t>(kMaxProjectLayers)) {
+            return fail(QStringLiteral("project exceeds the layer limit"));
+        }
+
+        qint64 totalPrimitives = 0;
+        qint64 totalGeometryPoints = 0;
         for (size_t i = 0; i < m_host.layerManager->layerCount(); i++) {
             Layer* layer = m_host.layerManager->getLayerAt(i);
             if (!layer) continue;
+            totalPrimitives += static_cast<qint64>(layer->primitiveCount());
+            if (totalPrimitives > kMaxProjectPrimitives)
+                return fail(QStringLiteral("project exceeds the primitive limit"));
+
             QJsonObject layerObj;
             layerObj["id"] = layer->id().toString();
             layerObj["name"] = layer->name();
@@ -58,7 +126,20 @@ bool ProjectFileService::saveToFile(const QString& fileName, bool updateSession)
             QJsonArray primitivesArray;
             for (const auto& prim : layer->primitives()) {
                 if (prim) {
-                    primitivesArray.append(prim->toJson());
+                    const QJsonObject primitiveJson = prim->toJson();
+                    QString primitiveError;
+                    if (!DrawingPrimitive::validateJson(primitiveJson,
+                                                        &primitiveError)) {
+                        return fail(QStringLiteral("invalid primitive: ")
+                                    + primitiveError);
+                    }
+                    totalGeometryPoints +=
+                        DrawingPrimitive::serializedPointCount(primitiveJson);
+                    if (totalGeometryPoints > kMaxProjectGeometryPoints) {
+                        return fail(QStringLiteral(
+                            "project exceeds the geometry point limit"));
+                    }
+                    primitivesArray.append(primitiveJson);
                 }
             }
             layerObj["primitives"] = primitivesArray;
@@ -80,6 +161,8 @@ bool ProjectFileService::saveToFile(const QString& fileName, bool updateSession)
     const QByteArray payload = QJsonDocument(json).toJson();
     if (payload.isEmpty())
         return fail(QStringLiteral("serialization produced no data"));
+    if (payload.size() > kMaxProjectFileBytes)
+        return fail(QStringLiteral("project exceeds the 256 MiB size limit"));
 
     QSaveFile file(fileName);
     file.setDirectWriteFallback(false);
@@ -142,9 +225,19 @@ bool ProjectFileService::loadFromFile(const QString& fileName,
     QFile file(fileName);
     if (!file.open(QIODevice::ReadOnly))
         return fail(file.errorString());
-    const QByteArray fileData = file.readAll();
+    const qint64 fileSize = file.size();
+    if (fileSize <= 0)
+        return fail(QStringLiteral("project file is empty"));
+    if (fileSize > kMaxProjectFileBytes)
+        return fail(QStringLiteral("project exceeds the 256 MiB size limit"));
+
+    // Bound the actual read as well as the initial stat so a concurrently
+    // growing file cannot bypass the size check.
+    const QByteArray fileData = file.read(kMaxProjectFileBytes + 1);
     if (file.error() != QFileDevice::NoError)
         return fail(file.errorString());
+    if (fileData.size() > kMaxProjectFileBytes || !file.atEnd())
+        return fail(QStringLiteral("project exceeds the 256 MiB size limit"));
     file.close();
 
     QJsonParseError parseError;
@@ -153,6 +246,12 @@ bool ProjectFileService::loadFromFile(const QString& fileName,
         return fail(QStringLiteral("invalid project JSON"));
 
     const QJsonObject json = doc.object();
+    if (json.contains(QStringLiteral("format"))
+        && (!json.value(QStringLiteral("format")).isString()
+            || json.value(QStringLiteral("format")).toString()
+                   != QStringLiteral("DrawingStudio"))) {
+        return fail(QStringLiteral("unsupported project format"));
+    }
     if (json.contains(QStringLiteral("version"))) {
         if (!json.value(QStringLiteral("version")).isDouble()
             || json.value(QStringLiteral("version")).toDouble() != 1.0) {
@@ -171,6 +270,9 @@ bool ProjectFileService::loadFromFile(const QString& fileName,
         && !json.value(QStringLiteral("canvas")).isObject()) {
         return fail(QStringLiteral("invalid canvas settings"));
     }
+    const QString budgetError = validateProjectBudgets(json, hasLayers);
+    if (!budgetError.isEmpty())
+        return fail(budgetError);
 
     // Struct to hold parsed results from worker thread
     struct ParsedLayer {

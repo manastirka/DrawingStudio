@@ -22,23 +22,8 @@
 
 namespace {
 constexpr int kConnectionTestTimeoutMs = 15000;
-
-QString connectionReplyError(const QNetworkReply *reply)
-{
-    if (!reply)
-        return QStringLiteral("No network response");
-    const QUrl redirect =
-        reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
-    if (redirect.isValid())
-        return QStringLiteral("Redirect refused");
-    if (reply->error() != QNetworkReply::NoError)
-        return reply->errorString();
-    const int status =
-        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    if (status < 200 || status >= 300)
-        return QStringLiteral("HTTP %1").arg(status);
-    return {};
-}
+constexpr qsizetype kConnectionTestMaxBytes = 8 * 1024 * 1024;
+constexpr const char *kReplyFailureProperty = "drawingstudio_ai_reply_failure";
 }
 
 // --- AIImageClient ---
@@ -181,14 +166,67 @@ QString AIImageClient::resolveModel(const QString &provider,
 }
 
 
+void AIImageClient::applyRequestPolicy(QNetworkRequest &request,
+                                       bool allowSafeRedirects)
+{
+    request.setAttribute(
+        QNetworkRequest::RedirectPolicyAttribute,
+        allowSafeRedirects ? QNetworkRequest::NoLessSafeRedirectPolicy
+                           : QNetworkRequest::ManualRedirectPolicy);
+}
+
+QString AIImageClient::networkReplyError(const QNetworkReply *reply)
+{
+    if (!reply)
+        return QStringLiteral("No network response");
+    const QString boundedFailure =
+        reply->property(kReplyFailureProperty).toString();
+    if (!boundedFailure.isEmpty())
+        return boundedFailure;
+    const QUrl redirect =
+        reply->attribute(QNetworkRequest::RedirectionTargetAttribute).toUrl();
+    if (redirect.isValid())
+        return QStringLiteral("Redirect refused");
+    if (reply->error() != QNetworkReply::NoError)
+        return reply->errorString();
+    const int status =
+        reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (status < 200 || status >= 300)
+        return QStringLiteral("HTTP %1").arg(status);
+    return {};
+}
+
 // --- watchReply ---
-void AIImageClient::watchReply(QNetworkReply *reply, int timeoutMs)
+void AIImageClient::watchReply(QNetworkReply *reply, int timeoutMs,
+                               qsizetype maxBytes)
 {
     if (!reply)
         return;
-    QTimer::singleShot(timeoutMs, reply, [reply]() {
-        if (reply->isRunning())
+
+    const auto enforceSizeLimit = [reply, maxBytes]() {
+        if (!reply->isRunning() || maxBytes <= 0)
+            return;
+        bool lengthOk = false;
+        const qint64 contentLength =
+            reply->header(QNetworkRequest::ContentLengthHeader).toLongLong(&lengthOk);
+        if ((lengthOk && contentLength > maxBytes)
+            || reply->bytesAvailable() > maxBytes) {
+            reply->setProperty(
+                kReplyFailureProperty,
+                QStringLiteral("Response exceeds %1 MiB limit")
+                    .arg(maxBytes / (1024 * 1024)));
             reply->abort();
+        }
+    };
+    connect(reply, &QNetworkReply::metaDataChanged, reply, enforceSizeLimit);
+    connect(reply, &QIODevice::readyRead, reply, enforceSizeLimit);
+
+    QTimer::singleShot(timeoutMs, reply, [reply]() {
+        if (reply->isRunning()) {
+            reply->setProperty(kReplyFailureProperty,
+                               QStringLiteral("Request timed out"));
+            reply->abort();
+        }
     });
 }
 
@@ -262,19 +300,22 @@ void AIImageClient::failWith(const QString &error)
 // --- downloadImageUrl ---
 void AIImageClient::downloadImageUrl(const QUrl &url, const QString &prompt)
 {
-    if (!url.isValid()) {
-        failWith(QStringLiteral("Invalid image URL from AI provider."));
+    if (!url.isValid() || url.host().isEmpty()
+        || (url.scheme() != QLatin1String("http")
+            && url.scheme() != QLatin1String("https"))) {
+        failWith(QStringLiteral("AI result URL must be a valid HTTP(S) URL."));
         return;
     }
     emit progress(QStringLiteral("Downloading result…"));
     QNetworkRequest req(url);
-    req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                     QNetworkRequest::NoLessSafeRedirectPolicy);
+    applyRequestPolicy(req, true);
     QNetworkReply *reply = m_nam->get(req);
+    watchReply(reply, kDownloadTimeoutMs);
     connect(reply, &QNetworkReply::finished, this, [this, reply, prompt]() {
         reply->deleteLater();
-        if (reply->error() != QNetworkReply::NoError) {
-            failWith(QStringLiteral("Download failed: %1").arg(reply->errorString()));
+        const QString error = networkReplyError(reply);
+        if (!error.isEmpty()) {
+            failWith(QStringLiteral("Download failed: %1").arg(error));
             return;
         }
         QImage image;
@@ -337,13 +378,12 @@ void AIImageClient::testConnection(const QString &provider,
         QNetworkRequest request(QUrl(
             QStringLiteral("https://generativelanguage.googleapis.com/v1beta/models")));
         request.setRawHeader("x-goog-api-key", apiKey.toUtf8());
-        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                             QNetworkRequest::ManualRedirectPolicy);
+        applyRequestPolicy(request);
         QNetworkReply *reply = m_nam->get(request);
-        watchReply(reply, kConnectionTestTimeoutMs);
+        watchReply(reply, kConnectionTestTimeoutMs, kConnectionTestMaxBytes);
         connect(reply, &QNetworkReply::finished, this, [this, reply]() {
             reply->deleteLater();
-            const QString error = connectionReplyError(reply);
+            const QString error = networkReplyError(reply);
             if (!error.isEmpty()) {
                 emit connectionTestFinished(
                     false, QStringLiteral("Nano Banana: %1").arg(error));
@@ -365,13 +405,12 @@ void AIImageClient::testConnection(const QString &provider,
         QNetworkRequest request(QUrl(QStringLiteral("https://api.openai.com/v1/models")));
         request.setRawHeader("Authorization",
                              QStringLiteral("Bearer %1").arg(apiKey).toUtf8());
-        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                             QNetworkRequest::ManualRedirectPolicy);
+        applyRequestPolicy(request);
         QNetworkReply *reply = m_nam->get(request);
-        watchReply(reply, kConnectionTestTimeoutMs);
+        watchReply(reply, kConnectionTestTimeoutMs, kConnectionTestMaxBytes);
         connect(reply, &QNetworkReply::finished, this, [this, reply]() {
             reply->deleteLater();
-            const QString error = connectionReplyError(reply);
+            const QString error = networkReplyError(reply);
             if (!error.isEmpty()) {
                 emit connectionTestFinished(
                     false, QStringLiteral("OpenAI: %1").arg(error));
@@ -392,13 +431,12 @@ void AIImageClient::testConnection(const QString &provider,
             QUrl(QStringLiteral("https://api.stability.ai/v1/user/account")));
         request.setRawHeader("Authorization",
                              QStringLiteral("Bearer %1").arg(apiKey).toUtf8());
-        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                             QNetworkRequest::ManualRedirectPolicy);
+        applyRequestPolicy(request);
         QNetworkReply *reply = m_nam->get(request);
-        watchReply(reply, kConnectionTestTimeoutMs);
+        watchReply(reply, kConnectionTestTimeoutMs, kConnectionTestMaxBytes);
         connect(reply, &QNetworkReply::finished, this, [this, reply]() {
             reply->deleteLater();
-            const QString error = connectionReplyError(reply);
+            const QString error = networkReplyError(reply);
             if (!error.isEmpty()) {
                 emit connectionTestFinished(
                     false, QStringLiteral("Stability: %1").arg(error));
@@ -459,13 +497,12 @@ void AIImageClient::testConnection(const QString &provider,
             return;
         }
         QNetworkRequest request(url);
-        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
-                             QNetworkRequest::ManualRedirectPolicy);
+        applyRequestPolicy(request);
         QNetworkReply *reply = m_nam->get(request);
-        watchReply(reply, kConnectionTestTimeoutMs);
+        watchReply(reply, kConnectionTestTimeoutMs, kConnectionTestMaxBytes);
         connect(reply, &QNetworkReply::finished, this, [this, reply, base]() {
             reply->deleteLater();
-            const QString error = connectionReplyError(reply);
+            const QString error = networkReplyError(reply);
             if (!error.isEmpty()) {
                 emit connectionTestFinished(
                     false, QStringLiteral("Remote SD unreachable: %1")
