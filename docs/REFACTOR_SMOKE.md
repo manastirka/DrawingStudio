@@ -65,12 +65,18 @@ also require the launch flag `--automation-allow-filesystem`.
 | AI generation redirect refusal, deadlines, and 128 MiB response cap | covered by `tst_AIImageClient` | 2026-07-22 |
 | Authenticated command server smoke script | _run after app rebuild_ | — |
 | SAM2 loopback binding, bearer auth, protocol marker, and request limit | covered by SAM2 security tests | 2026-07-22 |
+| SAM2 deadlines, response caps, strict mask decoding, and result budgets | covered by `tst_YOLOIntegration` | 2026-07-23 |
 | Atomic, validated SAM mask cache and corrupt-entry removal | covered by `tst_MaskCache` | 2026-07-22 |
 | Image resize bounds, aspect lock, mask-state restoration, and bounded refinements | covered by `tst_ImagePrimitiveResize` | 2026-07-22 |
 | Strict/bounded embedded PNG decoding and corrupt-image load preservation | covered by `tst_ImagePrimitiveResize` + `tst_ProjectFileService` | 2026-07-23 |
 | Bounded vector geometry, coordinate schema validation, and curve parameter clamps | covered by `tst_PrimitiveRoundTrip` + `tst_ProjectFileService` | 2026-07-23 |
 | Common style/transform bounds and malformed style rejection | covered by `tst_PrimitiveRoundTrip` | 2026-07-23 |
 | Finite/range-checked scalar geometry for shapes, dimensions, text, and images | covered by `tst_PrimitiveRoundTrip` | 2026-07-23 |
+| Strict layer/canvas metadata schema, bounded names, and finite opacity | covered by `tst_LayerManager` + `tst_ProjectFileService` | 2026-07-23 |
+| Bounded text content/formatting schema and strict nested effects | covered by `tst_PrimitiveRoundTrip` | 2026-07-23 |
+| Strict image-mask candidate/selection schema and total contour budgets | covered by `tst_ImagePrimitiveResize` + `tst_ProjectFileService` | 2026-07-23 |
+| Strict UUID fields and duplicate layer/primitive identity rejection | covered by `tst_PrimitiveRoundTrip` + `tst_ProjectFileService` | 2026-07-23 |
+| Finite direct setters and recursively bounded automation parameters | covered by `tst_PrimitiveRoundTrip` + `tst_DrawingCommandDispatcher` | 2026-07-23 |
 | Atomic/bounded project persistence, rejected-load preservation, and recovery isolation | covered by `tst_ProjectFileService` | 2026-07-22 |
 | Primitive JSON round-trip | covered by `tst_PrimitiveRoundTrip` | 2026-07-14 |
 | Silent autosave session callbacks | covered by `tst_ProjectFileService` | 2026-07-14 |

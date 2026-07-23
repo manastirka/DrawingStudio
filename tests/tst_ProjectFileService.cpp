@@ -10,6 +10,7 @@
 #include <QJsonObject>
 #include <QFile>
 #include <QTemporaryDir>
+#include <QUuid>
 #include <QtTest>
 
 #include <memory>
@@ -28,6 +29,9 @@ private slots:
     void excessivePrimitiveCountPreservesCurrentDocument();
     void excessiveGeometryPointCountPreservesCurrentDocument();
     void invalidEmbeddedImagePreservesCurrentDocument();
+    void invalidMetadataPreservesCurrentDocument();
+    void excessiveLayerNameSaveDoesNotOverwriteFile();
+    void duplicateIdentitiesAreRejected();
     void recoveryLoadDoesNotTouchSessionCallbacks();
     void silentSave_doesNotTouchSessionCallbacks();
 };
@@ -395,6 +399,223 @@ void tst_ProjectFileService::invalidEmbeddedImagePreservesCurrentDocument()
     const auto primitivesAfter = layers.getAllPrimitives();
     QCOMPARE(primitivesAfter.size(), static_cast<size_t>(1));
     QVERIFY(dynamic_cast<LinePrimitive *>(primitivesAfter.front()));
+}
+
+void tst_ProjectFileService::invalidMetadataPreservesCurrentDocument()
+{
+    LayerManager layers;
+    layers.addPrimitiveToActiveLayer(
+        std::make_unique<LinePrimitive>(QVector2D(1, 2), QVector2D(3, 4)));
+
+    QString status;
+    ProjectFileService svc;
+    ProjectFileService::Host host;
+    host.layerManager = &layers;
+    host.setStatusText = [&](const QString &message) { status = message; };
+    svc.setHost(host);
+
+    const auto makeRoot = [] {
+        QJsonObject layer;
+        layer["id"] = QUuid::createUuid().toString();
+        layer["name"] = QStringLiteral("Incoming");
+        layer["visible"] = true;
+        layer["locked"] = false;
+        layer["opacity"] = 1.0;
+        layer["primitives"] = QJsonArray();
+        QJsonArray incomingLayers;
+        incomingLayers.append(layer);
+
+        QJsonObject canvas;
+        canvas["backgroundColor"] = QStringLiteral("#ffffffff");
+        canvas["paperColor"] = QStringLiteral("#ffffffff");
+        canvas["gridVisible"] = true;
+        canvas["snapEnabled"] = true;
+
+        QJsonObject root;
+        root["format"] = QStringLiteral("DrawingStudio");
+        root["version"] = 1;
+        root["layers"] = incomingLayers;
+        root["canvas"] = canvas;
+        return root;
+    };
+
+    QVector<QPair<QString, QJsonObject>> cases;
+    {
+        QJsonObject root = makeRoot();
+        QJsonArray incomingLayers = root["layers"].toArray();
+        QJsonObject layer = incomingLayers[0].toObject();
+        layer["opacity"] = QStringLiteral("opaque");
+        incomingLayers[0] = layer;
+        root["layers"] = incomingLayers;
+        cases.append({QStringLiteral("opacity-type"), root});
+    }
+    {
+        QJsonObject root = makeRoot();
+        QJsonArray incomingLayers = root["layers"].toArray();
+        QJsonObject layer = incomingLayers[0].toObject();
+        layer["opacity"] = 2.0;
+        incomingLayers[0] = layer;
+        root["layers"] = incomingLayers;
+        cases.append({QStringLiteral("opacity-range"), root});
+    }
+    {
+        QJsonObject root = makeRoot();
+        QJsonArray incomingLayers = root["layers"].toArray();
+        QJsonObject layer = incomingLayers[0].toObject();
+        layer["visible"] = 1;
+        incomingLayers[0] = layer;
+        root["layers"] = incomingLayers;
+        cases.append({QStringLiteral("visible-type"), root});
+    }
+    {
+        QJsonObject root = makeRoot();
+        QJsonArray incomingLayers = root["layers"].toArray();
+        QJsonObject layer = incomingLayers[0].toObject();
+        layer["id"] = QStringLiteral("not-a-uuid");
+        incomingLayers[0] = layer;
+        root["layers"] = incomingLayers;
+        cases.append({QStringLiteral("layer-id"), root});
+    }
+    {
+        QJsonObject root = makeRoot();
+        QJsonArray incomingLayers = root["layers"].toArray();
+        QJsonObject layer = incomingLayers[0].toObject();
+        layer["name"] =
+            QString(ProjectFileService::kMaxLayerNameCharacters + 1,
+                    QLatin1Char('x'));
+        incomingLayers[0] = layer;
+        root["layers"] = incomingLayers;
+        cases.append({QStringLiteral("layer-name-limit"), root});
+    }
+    {
+        QJsonObject root = makeRoot();
+        QJsonObject canvas = root["canvas"].toObject();
+        canvas["backgroundColor"] = QStringLiteral("not-a-color");
+        root["canvas"] = canvas;
+        cases.append({QStringLiteral("canvas-color"), root});
+    }
+    {
+        QJsonObject root = makeRoot();
+        QJsonObject canvas = root["canvas"].toObject();
+        canvas["snapEnabled"] = QStringLiteral("yes");
+        root["canvas"] = canvas;
+        cases.append({QStringLiteral("canvas-bool"), root});
+    }
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    for (const auto &testCase : cases) {
+        const QString path =
+            dir.filePath(testCase.first + QStringLiteral(".drawing"));
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        const QByteArray payload = QJsonDocument(testCase.second).toJson();
+        QCOMPARE(file.write(payload), static_cast<qint64>(payload.size()));
+        file.close();
+
+        status.clear();
+        QVERIFY2(!svc.loadFromFile(path, /*waitUntilLoaded=*/true),
+                 qPrintable(testCase.first));
+        QVERIFY(status.contains(QStringLiteral("failed"), Qt::CaseInsensitive));
+        const auto primitives = layers.getAllPrimitives();
+        QCOMPARE(primitives.size(), static_cast<size_t>(1));
+        QVERIFY(dynamic_cast<LinePrimitive *>(primitives.front()));
+    }
+}
+
+void tst_ProjectFileService::excessiveLayerNameSaveDoesNotOverwriteFile()
+{
+    LayerManager layers;
+    Layer *layer = layers.activeLayer();
+    QVERIFY(layer);
+    layer->setName(QString(ProjectFileService::kMaxLayerNameCharacters + 1,
+                           QLatin1Char('x')));
+
+    QString status;
+    ProjectFileService svc;
+    ProjectFileService::Host host;
+    host.layerManager = &layers;
+    host.setStatusText = [&](const QString &message) { status = message; };
+    svc.setHost(host);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath(QStringLiteral("existing.drawing"));
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write("keep"), qint64(4));
+    file.close();
+
+    QVERIFY(!svc.saveToFile(path));
+    QVERIFY(status.contains(QStringLiteral("name"), Qt::CaseInsensitive));
+    QVERIFY(status.contains(QStringLiteral("limit"), Qt::CaseInsensitive));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), QByteArray("keep"));
+}
+
+void tst_ProjectFileService::duplicateIdentitiesAreRejected()
+{
+    LayerManager layers;
+    layers.addPrimitiveToActiveLayer(
+        std::make_unique<LinePrimitive>(QVector2D(1, 2), QVector2D(3, 4)));
+
+    QString status;
+    ProjectFileService svc;
+    ProjectFileService::Host host;
+    host.layerManager = &layers;
+    host.setStatusText = [&](const QString &message) { status = message; };
+    svc.setHost(host);
+
+    const QUuid duplicateLayerId = QUuid::createUuid();
+    QJsonObject layer;
+    layer["id"] = duplicateLayerId.toString();
+    layer["name"] = QStringLiteral("Duplicate");
+    layer["primitives"] = QJsonArray();
+    QJsonArray incomingLayers;
+    incomingLayers.append(layer);
+    incomingLayers.append(layer);
+    QJsonObject root;
+    root["format"] = QStringLiteral("DrawingStudio");
+    root["version"] = 1;
+    root["layers"] = incomingLayers;
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString loadPath =
+        dir.filePath(QStringLiteral("duplicate-layers.drawing"));
+    QFile file(loadPath);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QByteArray payload = QJsonDocument(root).toJson();
+    QCOMPARE(file.write(payload), static_cast<qint64>(payload.size()));
+    file.close();
+
+    QVERIFY(!svc.loadFromFile(loadPath, /*waitUntilLoaded=*/true));
+    QVERIFY(status.contains(QStringLiteral("duplicate"), Qt::CaseInsensitive));
+    QCOMPARE(layers.getAllPrimitives().size(), static_cast<size_t>(1));
+
+    LayerManager duplicatePrimitives;
+    auto first =
+        std::make_unique<LinePrimitive>(QVector2D(), QVector2D(1, 1));
+    auto second =
+        std::make_unique<LinePrimitive>(QVector2D(), QVector2D(2, 2));
+    second->fromJson(first->toJson());
+    duplicatePrimitives.addPrimitiveToActiveLayer(std::move(first));
+    duplicatePrimitives.addPrimitiveToActiveLayer(std::move(second));
+    host.layerManager = &duplicatePrimitives;
+    svc.setHost(host);
+
+    const QString savePath =
+        dir.filePath(QStringLiteral("existing.drawing"));
+    file.setFileName(savePath);
+    QVERIFY(file.open(QIODevice::WriteOnly));
+    QCOMPARE(file.write("keep"), qint64(4));
+    file.close();
+
+    status.clear();
+    QVERIFY(!svc.saveToFile(savePath));
+    QVERIFY(status.contains(QStringLiteral("duplicate"), Qt::CaseInsensitive));
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    QCOMPARE(file.readAll(), QByteArray("keep"));
 }
 
 void tst_ProjectFileService::recoveryLoadDoesNotTouchSessionCallbacks()

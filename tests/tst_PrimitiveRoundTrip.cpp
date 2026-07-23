@@ -32,6 +32,9 @@ private slots:
     void commonStyleParametersAreBounded();
     void malformedCommonStyleRejected();
     void malformedScalarGeometryRejected();
+    void malformedTextFormattingRejected();
+    void malformedIdentityRejected();
+    void directGeometryAndTextSettersAreBounded();
 };
 
 static std::unique_ptr<DrawingPrimitive> roundTrip(const DrawingPrimitive &src)
@@ -413,6 +416,100 @@ void tst_PrimitiveRoundTrip::malformedScalarGeometryRejected()
     json = image.toJson();
     json["sizeX"] = 0.0;
     QVERIFY(!DrawingPrimitive::createFromJson(json));
+}
+
+void tst_PrimitiveRoundTrip::malformedTextFormattingRejected()
+{
+    TextPrimitive text(QVector2D(4, 8), QStringLiteral("safe"));
+    QJsonObject json = text.toJson();
+    json["fontSize"] = QStringLiteral("large");
+    QVERIFY(!DrawingPrimitive::createFromJson(json));
+
+    json = text.toJson();
+    json["alignment"] = 99;
+    QVERIFY(!DrawingPrimitive::createFromJson(json));
+
+    json = text.toJson();
+    json["text"] =
+        QString(TextPrimitive::kMaxTextCharacters + 1, QLatin1Char('x'));
+    QVERIFY(!DrawingPrimitive::createFromJson(json));
+
+    json = text.toJson();
+    json["dropShadow"] = QStringLiteral("shadow");
+    QVERIFY(!DrawingPrimitive::createFromJson(json));
+
+    json = text.toJson();
+    QJsonObject gradient = json["gradient"].toObject();
+    gradient["startColor"] = QStringLiteral("not-a-color");
+    json["gradient"] = gradient;
+    QVERIFY(!DrawingPrimitive::createFromJson(json));
+}
+
+void tst_PrimitiveRoundTrip::malformedIdentityRejected()
+{
+    LinePrimitive line(QVector2D(), QVector2D(10, 10));
+    QJsonObject json = line.toJson();
+    json["id"] = QStringLiteral("not-a-uuid");
+    QVERIFY(!DrawingPrimitive::createFromJson(json));
+
+    json = line.toJson();
+    json["layerId"] = 42;
+    QVERIFY(!DrawingPrimitive::createFromJson(json));
+
+    json = line.toJson();
+    json["groupId"] = QUuid().toString();
+    QVERIFY(!DrawingPrimitive::createFromJson(json));
+
+    json = line.toJson();
+    json["connectedLineId"] = QStringLiteral("broken");
+    QVERIFY(!DrawingPrimitive::createFromJson(json));
+}
+
+void tst_PrimitiveRoundTrip::directGeometryAndTextSettersAreBounded()
+{
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float infinity = std::numeric_limits<float>::infinity();
+
+    LinePrimitive line(QVector2D(1, 2), QVector2D(3, 4));
+    line.setStartPoint(QVector2D(infinity, 5));
+    QCOMPARE(line.startPoint(), QVector2D(1, 2));
+
+    CirclePrimitive circle(QVector2D(), 10.0f);
+    circle.setRadius(nan);
+    QCOMPARE(circle.radius(), 10.0f);
+    circle.setRadius(-5.0f);
+    QCOMPARE(circle.radius(), 0.0f);
+
+    PolygonPrimitive polygon;
+    polygon.addPoint(QVector2D(nan, 0));
+    QVERIFY(polygon.points().empty());
+
+    SplinePrimitive spline;
+    spline.setSmoothness(0.5f);
+    spline.setSmoothness(nan);
+    QCOMPARE(spline.smoothness(), 0.5f);
+
+    DimensionPrimitive dimension;
+    dimension.setPixelsPerUnit(2.0f);
+    dimension.setPixelsPerUnit(nan);
+    QCOMPARE(dimension.pixelsPerUnit(), 2.0f);
+
+    TextPrimitive text;
+    text.setFontSize(20.0f);
+    text.setFontSize(nan);
+    QCOMPARE(text.fontSize(), 20.0f);
+    text.setFontSize(1.0e9f);
+    QCOMPARE(text.fontSize(), TextPrimitive::kMaxFontSize);
+    text.setScale(0.0f);
+    QCOMPARE(text.scale(), 0.001f);
+    text.setText(
+        QString(TextPrimitive::kMaxTextCharacters + 1, QLatin1Char('x')));
+    QCOMPARE(text.text().size(), TextPrimitive::kMaxTextCharacters);
+
+    ImagePrimitive image;
+    image.setPosition(QVector2D(5, 6));
+    image.setPosition(QVector2D(nan, 7));
+    QCOMPARE(image.position(), QVector2D(5, 6));
 }
 
 QTEST_MAIN(tst_PrimitiveRoundTrip)

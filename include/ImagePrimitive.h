@@ -11,6 +11,13 @@ class ImagePrimitive : public DrawingPrimitive {
   Q_OBJECT
 
 public:
+  static constexpr qsizetype kMaxSerializedMaskCandidates = 4096;
+  static constexpr qsizetype kMaxSerializedMaskPoints = 100000;
+  static constexpr int kMaxContourSmoothness = 32;
+  static constexpr int kMaxMaskFeather = 30;
+  static constexpr int kMaxMaskBlur = 20;
+  static constexpr int kMaxMaskExpand = 20;
+
   ImagePrimitive();
   ImagePrimitive(const QImage &image, const QVector2D &position,
                  const QVector2D &size);

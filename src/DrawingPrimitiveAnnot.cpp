@@ -38,7 +38,8 @@ float DimensionPrimitive::measuredLength() const
 
 void DimensionPrimitive::setPixelsPerUnit(float ppu)
 {
-    m_pixelsPerUnit = std::max(0.0001f, ppu);
+    if (std::isfinite(ppu))
+        m_pixelsPerUnit = std::clamp(ppu, 0.0001f, 1.0e9f);
 }
 
 void DimensionPrimitive::recalculateMeasurement()
@@ -126,6 +127,8 @@ std::vector<QVector2D> DimensionPrimitive::getControlPoints() const
 
 void DimensionPrimitive::setControlPointPosition(int index, const QVector2D& position)
 {
+    if (!isSupportedPoint(position))
+        return;
     if (index == 0) {
         m_start = position;
     } else if (index == 1) {
@@ -325,6 +328,8 @@ std::vector<QVector2D> TextPrimitive::getControlPoints() const
 
 void TextPrimitive::setControlPointPosition(int index, const QVector2D& position)
 {
+    if (!isSupportedPoint(position))
+        return;
     if (index == 0) {
         m_position = position;
     }
@@ -566,4 +571,3 @@ void TextPrimitive::fromJson(const QJsonObject& json)
         m_gradient.angle = gradient["angle"].toDouble(0.0);
     }
 }
-

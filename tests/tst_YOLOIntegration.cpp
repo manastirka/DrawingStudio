@@ -13,6 +13,7 @@ private slots:
   void initTestCase();
   void testAuthenticatedHealthRequest();
   void testRejectsLegacyHealthResponse();
+  void testRejectsOversizedHealthResponse();
   void testRejectsNonLoopbackServiceUrl();
   void testHumanDetection();
 };
@@ -98,6 +99,36 @@ void tst_YOLOIntegration::testRejectsLegacyHealthResponse() {
   QTRY_COMPARE_WITH_TIMEOUT(healthSpy.count(), 1, 2000);
   QCOMPARE(healthSpy.at(0).at(0).toBool(), false);
   QVERIFY(healthSpy.at(0).at(1).toString().contains("authenticated protocol"));
+}
+
+void tst_YOLOIntegration::testRejectsOversizedHealthResponse() {
+  QTcpServer server;
+  QVERIFY(server.listen(QHostAddress::LocalHost, 0));
+
+  SAM2Client client;
+  client.setServiceUrl(
+      QStringLiteral("http://127.0.0.1:%1").arg(server.serverPort()));
+  QSignalSpy healthSpy(&client, &SAM2Client::healthCheckComplete);
+  client.checkHealth();
+
+  QTcpSocket *socket = nullptr;
+  const QByteArray request = receiveRequest(server, socket);
+  QVERIFY(socket);
+  QVERIFY(!request.isEmpty());
+
+  const QByteArray body(SAM2Client::kMaxHealthResponseBytes + 1, 'x');
+  QByteArray response =
+      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+      "X-DrawingStudio-SAM2-Protocol: 2\r\nContent-Length: "
+      + QByteArray::number(body.size())
+      + "\r\nConnection: close\r\n\r\n" + body;
+  socket->write(response);
+  socket->disconnectFromHost();
+
+  QTRY_COMPARE_WITH_TIMEOUT(healthSpy.count(), 1, 3000);
+  QCOMPARE(healthSpy.at(0).at(0).toBool(), false);
+  QVERIFY(healthSpy.at(0).at(1).toString().contains(
+      QStringLiteral("size limit"), Qt::CaseInsensitive));
 }
 
 void tst_YOLOIntegration::testRejectsNonLoopbackServiceUrl() {

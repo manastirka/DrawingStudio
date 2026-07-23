@@ -17,6 +17,12 @@ public:
   explicit SAM2Client(QObject *parent = nullptr);
 
   static constexpr qsizetype kMinAuthTokenBytes = 16;
+  static constexpr qint64 kMaxHealthResponseBytes = 1024 * 1024;
+  static constexpr qint64 kMaxSegmentationResponseBytes =
+      128LL * 1024LL * 1024LL;
+  static constexpr qint64 kMaxMaskPixels = 64LL * 1024LL * 1024LL;
+  static constexpr qsizetype kMaxResponseCandidates = 4096;
+  static constexpr qsizetype kMaxResponseContourPoints = 100000;
 
   // Shared by all clients in this process. SAM2ServiceManager sets this before
   // launching or probing the local helper service.

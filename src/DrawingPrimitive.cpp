@@ -238,6 +238,28 @@ qsizetype DrawingPrimitive::serializedPointCount(const QJsonObject &json)
         return json.value(QStringLiteral("points")).isArray()
                    ? json.value(QStringLiteral("points")).toArray().size()
                    : 0;
+    case PrimitiveType::Image: {
+        qsizetype count =
+            json.value(QStringLiteral("maskContour")).isArray()
+                ? json.value(QStringLiteral("maskContour")).toArray().size()
+                : 0;
+        const QJsonArray candidates =
+            json.value(QStringLiteral("maskCandidates")).toArray();
+        for (const QJsonValue &candidateValue : candidates) {
+            if (!candidateValue.isObject())
+                continue;
+            const QJsonValue contour =
+                candidateValue.toObject().value(QStringLiteral("contour"));
+            if (!contour.isArray())
+                continue;
+            const qsizetype remaining =
+                std::numeric_limits<qsizetype>::max() - count;
+            if (contour.toArray().size() > remaining)
+                return std::numeric_limits<qsizetype>::max();
+            count += contour.toArray().size();
+        }
+        return count;
+    }
     default:
         return 0;
     }
@@ -296,6 +318,29 @@ bool DrawingPrimitive::validateJson(const QJsonObject &json, QString *error)
         }
     }
 
+    const auto validateUuid =
+        [&json, &fail](const char *key, bool allowNull) {
+            const QString field = QString::fromLatin1(key);
+            if (!json.contains(field))
+                return true;
+            const QJsonValue value = json.value(field);
+            if (!value.isString())
+                return fail(field + QStringLiteral(" is invalid"));
+            const QString text = value.toString();
+            const QUuid id(text);
+            const bool canonicalNull = text == QUuid().toString();
+            if ((id.isNull() && !canonicalNull)
+                || (!allowNull && id.isNull())) {
+                return fail(field + QStringLiteral(" is invalid"));
+            }
+            return true;
+        };
+    if (!validateUuid("id", false)
+        || !validateUuid("layerId", true)
+        || !validateUuid("groupId", false)) {
+        return false;
+    }
+
     const auto validateRequiredNumber =
         [&json, &fail](const char *key, double minimum, double maximum) {
             const QString field = QString::fromLatin1(key);
@@ -333,11 +378,61 @@ bool DrawingPrimitive::validateJson(const QJsonObject &json, QString *error)
             }
             return true;
         };
+    const auto validateObjectNumber =
+        [&fail](const QJsonObject &object, const char *key, double minimum,
+                double maximum, const QString &prefix = QString()) {
+            const QString field = QString::fromLatin1(key);
+            if (!object.contains(field))
+                return true;
+            const QJsonValue value = object.value(field);
+            const double number = value.toDouble();
+            if (!value.isDouble() || !std::isfinite(number)
+                || number < minimum || number > maximum) {
+                return fail(prefix + field + QStringLiteral(" is invalid"));
+            }
+            return true;
+        };
+    const auto validateObjectBool =
+        [&fail](const QJsonObject &object, const char *key,
+                const QString &prefix = QString()) {
+            const QString field = QString::fromLatin1(key);
+            if (object.contains(field) && !object.value(field).isBool())
+                return fail(prefix + field + QStringLiteral(" is invalid"));
+            return true;
+        };
+    const auto validateObjectColor =
+        [&fail](const QJsonObject &object, const char *key,
+                const QString &prefix = QString()) {
+            const QString field = QString::fromLatin1(key);
+            if (object.contains(field)
+                && (!object.value(field).isString()
+                    || !QColor(object.value(field).toString()).isValid())) {
+                return fail(prefix + field + QStringLiteral(" is invalid"));
+            }
+            return true;
+        };
+    const auto validateObjectInteger =
+        [&fail](const QJsonObject &object, const char *key, int minimum,
+                int maximum, const QString &prefix = QString()) {
+            const QString field = QString::fromLatin1(key);
+            if (!object.contains(field))
+                return true;
+            const QJsonValue value = object.value(field);
+            const double number = value.toDouble();
+            if (!value.isDouble() || !std::isfinite(number)
+                || std::floor(number) != number
+                || number < minimum || number > maximum) {
+                return fail(prefix + field + QStringLiteral(" is invalid"));
+            }
+            return true;
+        };
 
     QString pointKey;
     switch (static_cast<PrimitiveType>(static_cast<int>(rawType))) {
     case PrimitiveType::Line:
         if (!validateCoordinates({"startX", "startY", "endX", "endY"}))
+            return false;
+        if (!validateUuid("connectedLineId", false))
             return false;
         return true;
     case PrimitiveType::Rectangle:
@@ -380,12 +475,238 @@ bool DrawingPrimitive::validateJson(const QJsonObject &json, QString *error)
     case PrimitiveType::Text:
         if (!validateCoordinates({"positionX", "positionY"}))
             return false;
+        if (json.contains(QStringLiteral("text"))
+            && (!json.value(QStringLiteral("text")).isString()
+                || json.value(QStringLiteral("text")).toString().size()
+                       > TextPrimitive::kMaxTextCharacters)) {
+            return fail(QStringLiteral("text is invalid or exceeds the limit"));
+        }
+        if (json.contains(QStringLiteral("fontFamily"))
+            && (!json.value(QStringLiteral("fontFamily")).isString()
+                || json.value(QStringLiteral("fontFamily")).toString().size()
+                       > TextPrimitive::kMaxFontFamilyCharacters)) {
+            return fail(QStringLiteral("fontFamily is invalid or exceeds the limit"));
+        }
+        for (const char *key :
+             {"bold", "italic", "underline", "followsSpline"}) {
+            if (!validateObjectBool(json, key))
+                return false;
+        }
+        if (!validateObjectInteger(json, "baselineShift", 0, 2)
+            || !validateObjectInteger(json, "alignment", 0, 3)
+            || !validateObjectNumber(json, "fontSize", 1.0,
+                                     TextPrimitive::kMaxFontSize)
+            || !validateObjectNumber(json, "rotation", -3600.0, 3600.0)
+            || !validateObjectNumber(json, "scale", 0.001, 1000.0)
+            || !validateObjectNumber(
+                json, "pathOffset", -kMaxSerializedCoordinateMagnitude,
+                kMaxSerializedCoordinateMagnitude)
+            || !validateObjectNumber(json, "letterSpacing", -1000.0, 1000.0)
+            || !validateObjectNumber(json, "lineSpacing", 0.01, 100.0)
+            || !validateObjectNumber(
+                json, "textBoxWidth", 0.0,
+                kMaxSerializedCoordinateMagnitude)
+            || !validateObjectNumber(
+                json, "textBoxHeight", 0.0,
+                kMaxSerializedCoordinateMagnitude)) {
+            return false;
+        }
+        if (json.contains(QStringLiteral("splineId"))) {
+            const QJsonValue splineId = json.value(QStringLiteral("splineId"));
+            const QString idText = splineId.toString();
+            if (!splineId.isString()
+                || (QUuid(idText).isNull()
+                    && idText != QUuid().toString())) {
+                return fail(QStringLiteral("splineId is invalid"));
+            }
+        }
+        for (const char *objectKey : {"dropShadow", "stroke", "gradient"}) {
+            const QString field = QString::fromLatin1(objectKey);
+            if (json.contains(field) && !json.value(field).isObject())
+                return fail(field + QStringLiteral(" is invalid"));
+        }
+        if (json.contains(QStringLiteral("dropShadow"))) {
+            const QJsonObject shadow =
+                json.value(QStringLiteral("dropShadow")).toObject();
+            if (!validateObjectBool(shadow, "enabled", "dropShadow.")
+                || !validateObjectColor(shadow, "color", "dropShadow.")
+                || !validateObjectNumber(shadow, "offsetX", -10000.0,
+                                         10000.0, "dropShadow.")
+                || !validateObjectNumber(shadow, "offsetY", -10000.0,
+                                         10000.0, "dropShadow.")
+                || !validateObjectNumber(shadow, "blur", 0.0, 1000.0,
+                                         "dropShadow.")
+                || !validateObjectNumber(shadow, "angle", -360.0, 360.0,
+                                         "dropShadow.")
+                || !validateObjectNumber(shadow, "distance", 0.0, 10000.0,
+                                         "dropShadow.")) {
+                return false;
+            }
+        }
+        if (json.contains(QStringLiteral("stroke"))) {
+            const QJsonObject stroke =
+                json.value(QStringLiteral("stroke")).toObject();
+            if (!validateObjectBool(stroke, "enabled", "stroke.")
+                || !validateObjectColor(stroke, "color", "stroke.")
+                || !validateObjectNumber(stroke, "width", 0.0, 1000.0,
+                                         "stroke.")) {
+                return false;
+            }
+        }
+        if (json.contains(QStringLiteral("gradient"))) {
+            const QJsonObject gradient =
+                json.value(QStringLiteral("gradient")).toObject();
+            if (!validateObjectBool(gradient, "enabled", "gradient.")
+                || !validateObjectColor(gradient, "startColor", "gradient.")
+                || !validateObjectColor(gradient, "endColor", "gradient.")
+                || !validateObjectNumber(gradient, "angle", -360.0, 360.0,
+                                         "gradient.")) {
+                return false;
+            }
+        }
         return true;
     case PrimitiveType::Image:
         if (!validateCoordinates({"posX", "posY"})
             || !validateNonNegativeGeometry({"sizeX", "sizeY"}, false)
             || !validateCoordinates({"rotation"})) {
             return false;
+        }
+        for (const char *key :
+             {"maintainAspectRatio", "maskInverted", "maskOverlayVisible"}) {
+            if (!validateObjectBool(json, key))
+                return false;
+        }
+        if (!validateObjectInteger(
+                json, "contourSmoothness", 0,
+                ImagePrimitive::kMaxContourSmoothness)
+            || !validateObjectInteger(json, "maskFeather", 0,
+                                      ImagePrimitive::kMaxMaskFeather)
+            || !validateObjectInteger(json, "maskBlur", 0,
+                                      ImagePrimitive::kMaxMaskBlur)
+            || !validateObjectInteger(json, "maskExpand",
+                                      -ImagePrimitive::kMaxMaskExpand,
+                                      ImagePrimitive::kMaxMaskExpand)) {
+            return false;
+        }
+        {
+            qsizetype totalMaskPoints = 0;
+            const auto validateMaskContour =
+                [&fail, &totalMaskPoints](const QJsonArray &contour,
+                                         const QString &field) {
+                    if (contour.size()
+                        > ImagePrimitive::kMaxSerializedMaskPoints
+                              - totalMaskPoints) {
+                        return fail(QStringLiteral(
+                            "serialized mask points exceed the limit"));
+                    }
+                    totalMaskPoints += contour.size();
+                    for (const QJsonValue &pointValue : contour) {
+                        if (!pointValue.isObject())
+                            return fail(field + QStringLiteral(
+                                                    " point is invalid"));
+                        const QJsonObject point = pointValue.toObject();
+                        const QJsonValue x = point.value(QStringLiteral("x"));
+                        const QJsonValue y = point.value(QStringLiteral("y"));
+                        if (!x.isDouble() || !y.isDouble()
+                            || !std::isfinite(x.toDouble())
+                            || !std::isfinite(y.toDouble())
+                            || std::abs(x.toDouble())
+                                   > kMaxSerializedCoordinateMagnitude
+                            || std::abs(y.toDouble())
+                                   > kMaxSerializedCoordinateMagnitude) {
+                            return fail(field + QStringLiteral(
+                                                    " point is invalid"));
+                        }
+                    }
+                    return true;
+                };
+
+            if (json.contains(QStringLiteral("maskContour"))) {
+                const QJsonValue contour =
+                    json.value(QStringLiteral("maskContour"));
+                if (!contour.isArray()
+                    || !validateMaskContour(contour.toArray(),
+                                            QStringLiteral("maskContour"))) {
+                    return false;
+                }
+            }
+
+            qsizetype candidateCount = 0;
+            if (json.contains(QStringLiteral("maskCandidates"))) {
+                const QJsonValue candidatesValue =
+                    json.value(QStringLiteral("maskCandidates"));
+                if (!candidatesValue.isArray())
+                    return fail(QStringLiteral("maskCandidates is invalid"));
+                const QJsonArray candidates = candidatesValue.toArray();
+                candidateCount = candidates.size();
+                if (candidateCount
+                    > ImagePrimitive::kMaxSerializedMaskCandidates) {
+                    return fail(QStringLiteral(
+                        "maskCandidates exceeds the limit"));
+                }
+                for (const QJsonValue &candidateValue : candidates) {
+                    if (!candidateValue.isObject())
+                        return fail(QStringLiteral(
+                            "mask candidate is invalid"));
+                    const QJsonObject candidate = candidateValue.toObject();
+                    if (!candidate.value(QStringLiteral("contour")).isArray())
+                        return fail(QStringLiteral(
+                            "mask candidate contour is invalid"));
+                    if (!validateObjectInteger(
+                            candidate, "id",
+                            std::numeric_limits<int>::min(),
+                            std::numeric_limits<int>::max(),
+                            QStringLiteral("maskCandidate."))
+                        || !validateObjectNumber(
+                            candidate, "score", 0.0, 1.0,
+                            QStringLiteral("maskCandidate."))
+                        || !validateObjectNumber(
+                            candidate, "stability", 0.0, 1.0,
+                            QStringLiteral("maskCandidate."))
+                        || !validateObjectNumber(
+                            candidate, "predicted_iou", 0.0, 1.0,
+                            QStringLiteral("maskCandidate."))
+                        || !validateObjectNumber(
+                            candidate, "area_percent", 0.0, 100.0,
+                            QStringLiteral("maskCandidate."))
+                        || !validateMaskContour(
+                            candidate.value(QStringLiteral("contour")).toArray(),
+                            QStringLiteral("maskCandidate.contour"))) {
+                        return false;
+                    }
+                }
+            }
+
+            if (json.contains(QStringLiteral("selectedMaskIndex"))) {
+                if (!validateObjectInteger(
+                        json, "selectedMaskIndex", -1,
+                        candidateCount > 0
+                            ? static_cast<int>(candidateCount - 1)
+                            : -1)) {
+                    return false;
+                }
+            }
+            if (json.contains(QStringLiteral("selectedMaskIndices"))) {
+                const QJsonValue selectedValue =
+                    json.value(QStringLiteral("selectedMaskIndices"));
+                if (!selectedValue.isArray())
+                    return fail(QStringLiteral(
+                        "selectedMaskIndices is invalid"));
+                const QJsonArray selected = selectedValue.toArray();
+                if (selected.size()
+                    > ImagePrimitive::kMaxSerializedMaskCandidates) {
+                    return fail(QStringLiteral(
+                        "selectedMaskIndices exceeds the limit"));
+                }
+                for (const QJsonValue &indexValue : selected) {
+                    const double index = indexValue.toDouble(-1.0);
+                    if (!indexValue.isDouble() || std::floor(index) != index
+                        || index < 0.0 || index >= candidateCount) {
+                        return fail(QStringLiteral(
+                            "selectedMaskIndices contains an invalid index"));
+                    }
+                }
+            }
         }
         return true;
     default:

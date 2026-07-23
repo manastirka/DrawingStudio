@@ -169,6 +169,8 @@ std::vector<QVector2D> LinePrimitive::getControlPoints() const
 
 void LinePrimitive::setControlPointPosition(int index, const QVector2D& position)
 {
+    if (!isSupportedPoint(position))
+        return;
     if (index == 0) {
         m_start = position;
     } else if (index == 1) {
@@ -358,6 +360,8 @@ std::vector<QVector2D> RectanglePrimitive::getControlPoints() const
 
 void RectanglePrimitive::setControlPointPosition(int index, const QVector2D& position)
 {
+    if (!isSupportedPoint(position))
+        return;
     switch (index) {
         case 0: // Top-left
             m_topLeft = position;
@@ -538,6 +542,8 @@ std::vector<QVector2D> EllipsePrimitive::getControlPoints() const
 
 void EllipsePrimitive::setControlPointPosition(int index, const QVector2D& position)
 {
+    if (!isSupportedPoint(position))
+        return;
     switch (index) {
         case 0: // Center
             m_center = position;
@@ -572,6 +578,8 @@ std::vector<QVector2D> CirclePrimitive::getControlPoints() const
 
 void CirclePrimitive::setControlPointPosition(int index, const QVector2D& position)
 {
+    if (!isSupportedPoint(position))
+        return;
     if (index == 0) {
         m_center = position;
     } else {
@@ -728,6 +736,8 @@ std::vector<QVector2D> ArcPrimitive::getControlPoints() const
 
 void ArcPrimitive::setControlPointPosition(int index, const QVector2D& position)
 {
+    if (!isSupportedPoint(position))
+        return;
     switch (index) {
         case 0: // Center
             m_center = position;
@@ -867,7 +877,8 @@ std::vector<QVector2D> PolygonPrimitive::getControlPoints() const
 
 void PolygonPrimitive::setControlPointPosition(int index, const QVector2D& position)
 {
-    if (index >= 0 && index < static_cast<int>(m_points.size())) {
+    if (isSupportedPoint(position) && index >= 0
+        && index < static_cast<int>(m_points.size())) {
         m_points[index] = position;
     }
 }
@@ -998,12 +1009,17 @@ void PolygonPrimitive::translate(const QVector2D& offset)
 
 void PolygonPrimitive::addPoint(const QVector2D &point)
 {
-    m_points.push_back(point);
+    if (isSupportedPoint(point)
+        && m_points.size()
+               < static_cast<size_t>(kMaxSerializedPointsPerPrimitive)) {
+        m_points.push_back(point);
+    }
 }
 
 void PolygonPrimitive::setPoint(int index, const QVector2D &point)
 {
-    if (index >= 0 && index < static_cast<int>(m_points.size())) {
+    if (isSupportedPoint(point) && index >= 0
+        && index < static_cast<int>(m_points.size())) {
         m_points[index] = point;
     }
 }
@@ -1048,4 +1064,3 @@ void PolygonPrimitive::fromJson(const QJsonObject& json)
     m_closed = json["closed"].toBool(true);
     m_filled = json["filled"].toBool(false);
 }
-

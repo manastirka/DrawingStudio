@@ -210,10 +210,22 @@ project; coordinates must be finite and within the supported canvas range.
 Scalar geometry for lines, shapes, dimensions, text, and images follows the
 same finite ±1 billion canvas range; radii cannot be negative and serialized
 image dimensions must be positive.
+Project metadata is validated before replacing the open document: layer
+opacity stays within 0–1, layer names are limited to 4,096 characters, layer
+IDs must be valid UUIDs, and canvas colors and boolean settings use strict
+types.
+Primitive, layer, group, and object-reference UUIDs use strict syntax, and
+projects with duplicate layer or primitive identities are rejected on both
+load and save.
 Shared primitive styling is normalized at the model boundary: opacity stays
 within 0–1, line width and shadow blur within 0–1,000, shadow offsets within
 ±10,000, and shape rotation within ±360 degrees. Invalid serialized colors,
 pen styles, or non-numeric style fields reject the primitive.
+Serialized text is limited to one million characters and uses strict bounded
+font, transform, alignment, spacing, box, shadow, stroke, and gradient fields.
+Direct geometry/text setters ignore non-finite coordinates and clamp supported
+ranges. Automation parameters are recursively bounded by depth, collection
+size, string length, and finite ±1-billion numeric values before dispatch.
 
 Image resizing keeps dimensions finite and positive, prevents handles from
 crossing their opposite edges, and preserves the source ratio when aspect lock
@@ -223,9 +235,15 @@ Saved images retain mask candidates, multi-selection, inversion, overlay, and
 refinement settings. Undo/redo and project loading clear optional mask data
 before restoration, preventing stale contours from leaking between snapshots;
 refinement values are bounded to their supported UI ranges.
+Serialized masks use strict finite point/candidate schemas, at most 4,096
+candidates and 100,000 total contour points per image; mask points also count
+toward the project geometry budget.
 Embedded project images use strict base64/PNG decoding and are limited to
 64 MiB compressed, 16,384 pixels per dimension, and 64 megapixels decoded.
 An invalid embedded image rejects the project before the open document changes.
+SAM2 HTTP calls use endpoint-specific deadlines, loopback-only authenticated
+requests, 1 MiB health/progress and 128 MiB segmentation response caps, strict
+base64 decoding, and bounded candidate, mask, and contour parsing.
 
 ### Windows (Visual Studio):
 ```cmd

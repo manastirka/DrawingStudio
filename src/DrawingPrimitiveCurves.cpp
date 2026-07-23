@@ -211,12 +211,17 @@ void CurvePrimitive::translate(const QVector2D& offset)
 
 void CurvePrimitive::addControlPoint(const QVector2D &point)
 {
-    m_controlPoints.push_back(point);
+    if (isSupportedPoint(point)
+        && m_controlPoints.size()
+               < static_cast<size_t>(kMaxSerializedPointsPerPrimitive)) {
+        m_controlPoints.push_back(point);
+    }
 }
 
 void CurvePrimitive::setControlPoint(int index, const QVector2D &point)
 {
-    if (index >= 0 && index < static_cast<int>(m_controlPoints.size())) {
+    if (isSupportedPoint(point) && index >= 0
+        && index < static_cast<int>(m_controlPoints.size())) {
         m_controlPoints[index] = point;
     }
 }
@@ -403,7 +408,8 @@ std::vector<QVector2D> CurvePrimitive::getControlPoints() const
 
 void CurvePrimitive::setControlPointPosition(int index, const QVector2D& position)
 {
-    if (index >= 0 && index < static_cast<int>(m_controlPoints.size())) {
+    if (isSupportedPoint(position) && index >= 0
+        && index < static_cast<int>(m_controlPoints.size())) {
         m_controlPoints[index] = position;
     }
 }
@@ -417,7 +423,8 @@ std::vector<QVector2D> BezierCurvePrimitive::getControlPoints() const
 
 void BezierCurvePrimitive::setControlPointPosition(int index, const QVector2D& position)
 {
-    if (index >= 0 && index < static_cast<int>(m_controlPoints.size())) {
+    if (isSupportedPoint(position) && index >= 0
+        && index < static_cast<int>(m_controlPoints.size())) {
         m_controlPoints[index] = position;
     }
 }
@@ -435,7 +442,18 @@ BezierCurvePrimitive::BezierCurvePrimitive()
 
 void BezierCurvePrimitive::setControlPoints(const std::vector<QVector2D> &points)
 {
-    m_controlPoints = points;
+    m_controlPoints.clear();
+    m_controlPoints.reserve(std::min(
+        points.size(),
+        static_cast<size_t>(kMaxSerializedPointsPerPrimitive)));
+    for (const QVector2D &point : points) {
+        if (m_controlPoints.size()
+                >= static_cast<size_t>(kMaxSerializedPointsPerPrimitive)) {
+            break;
+        }
+        if (isSupportedPoint(point))
+            m_controlPoints.push_back(point);
+    }
     if (m_controlPoints.size() < 4) {
         m_controlPoints.resize(4, QVector2D(0, 0));
     }
@@ -712,7 +730,8 @@ std::vector<QVector2D> SplinePrimitive::getControlPoints() const
 
 void SplinePrimitive::setControlPointPosition(int index, const QVector2D& position)
 {
-    if (index >= 0 && index < static_cast<int>(m_points.size())) {
+    if (isSupportedPoint(position) && index >= 0
+        && index < static_cast<int>(m_points.size())) {
         m_points[index] = position;
     }
 }
@@ -889,12 +908,17 @@ void SplinePrimitive::translate(const QVector2D& offset)
 
 void SplinePrimitive::addPoint(const QVector2D &point)
 {
-    m_points.push_back(point);
+    if (isSupportedPoint(point)
+        && m_points.size()
+               < static_cast<size_t>(kMaxSerializedPointsPerPrimitive)) {
+        m_points.push_back(point);
+    }
 }
 
 void SplinePrimitive::setPoint(int index, const QVector2D &point)
 {
-    if (index >= 0 && index < static_cast<int>(m_points.size())) {
+    if (isSupportedPoint(point) && index >= 0
+        && index < static_cast<int>(m_points.size())) {
         m_points[index] = point;
     }
 }

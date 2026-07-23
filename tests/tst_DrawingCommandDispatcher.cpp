@@ -23,6 +23,7 @@ private slots:
     void cleanup();
 
     void drawLineAddsPrimitive();
+    void extremeNumericParameterIsRejected();
     void unknownActionSetsErrorResult();
     void undoHostCallbackInvoked();
     void everyCatalogActionHasDispatcherHandler();
@@ -97,6 +98,23 @@ void tst_DrawingCommandDispatcher::drawLineAddsPrimitive()
     QCOMPARE(static_cast<int>(prims.size()), before + 1);
     QVERIFY(dynamic_cast<LinePrimitive *>(prims.back()) != nullptr);
     QVERIFY(m_cmds->undoStackSize() >= 1);
+}
+
+void tst_DrawingCommandDispatcher::extremeNumericParameterIsRejected()
+{
+    const int before = static_cast<int>(m_layers->getAllPrimitives().size());
+    QJsonObject params;
+    params["x1"] = 0.0;
+    params["y1"] = 0.0;
+    params["x2"] = 1.0e12;
+    params["y2"] = 10.0;
+
+    m_dispatcher->execute(QStringLiteral("draw_line"), params);
+
+    QCOMPARE(static_cast<int>(m_layers->getAllPrimitives().size()), before);
+    QCOMPARE(m_dispatcher->lastResult().value("success").toBool(), false);
+    QVERIFY(m_dispatcher->lastResult().value("error").toString().contains(
+        QStringLiteral("Invalid parameters")));
 }
 
 void tst_DrawingCommandDispatcher::unknownActionSetsErrorResult()

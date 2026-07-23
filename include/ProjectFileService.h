@@ -23,6 +23,7 @@ public:
     static constexpr qsizetype kMaxProjectLayers = 4096;
     static constexpr qsizetype kMaxProjectPrimitives = 100000;
     static constexpr qsizetype kMaxProjectGeometryPoints = 100000;
+    static constexpr qsizetype kMaxLayerNameCharacters = 4096;
 
     struct Host {
         DrawingCanvas *canvas = nullptr;

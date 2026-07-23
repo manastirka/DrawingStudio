@@ -15,12 +15,115 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QSaveFile>
+#include <QSet>
 #include <QThread>
 #include <QUuid>
+#include <cmath>
 #include <memory>
 #include <vector>
 
 namespace {
+QString validateLayerMetadata(const QJsonObject &layer)
+{
+    if (layer.contains(QStringLiteral("name"))) {
+        const QJsonValue name = layer.value(QStringLiteral("name"));
+        if (!name.isString())
+            return QStringLiteral("layer name is invalid");
+        if (name.toString().size()
+            > ProjectFileService::kMaxLayerNameCharacters) {
+            return QStringLiteral("layer name exceeds the limit");
+        }
+    }
+
+    if (layer.contains(QStringLiteral("id"))) {
+        const QJsonValue id = layer.value(QStringLiteral("id"));
+        if (!id.isString() || QUuid(id.toString()).isNull())
+            return QStringLiteral("layer id is invalid");
+    }
+
+    for (const char *key : {"visible", "locked"}) {
+        const QString field = QString::fromLatin1(key);
+        if (layer.contains(field) && !layer.value(field).isBool())
+            return QStringLiteral("layer ") + field + QStringLiteral(" is invalid");
+    }
+
+    if (layer.contains(QStringLiteral("opacity"))) {
+        const QJsonValue opacity = layer.value(QStringLiteral("opacity"));
+        const double value = opacity.toDouble(-1.0);
+        if (!opacity.isDouble() || !std::isfinite(value)
+            || value < 0.0 || value > 1.0) {
+            return QStringLiteral("layer opacity is invalid");
+        }
+    }
+    return {};
+}
+
+QString validateCanvasMetadata(const QJsonObject &canvas)
+{
+    for (const char *key : {"backgroundColor", "paperColor"}) {
+        const QString field = QString::fromLatin1(key);
+        if (canvas.contains(field)
+            && (!canvas.value(field).isString()
+                || !QColor(canvas.value(field).toString()).isValid())) {
+            return QStringLiteral("canvas ") + field
+                   + QStringLiteral(" is invalid");
+        }
+    }
+
+    for (const char *key : {"gridVisible", "snapEnabled"}) {
+        const QString field = QString::fromLatin1(key);
+        if (canvas.contains(field) && !canvas.value(field).isBool())
+            return QStringLiteral("canvas ") + field
+                   + QStringLiteral(" is invalid");
+    }
+    return {};
+}
+
+QString validateProjectIdentities(const QJsonObject &json, bool hasLayers)
+{
+    QSet<QUuid> layerIds;
+    QSet<QUuid> primitiveIds;
+    const auto validatePrimitives =
+        [&primitiveIds](const QJsonArray &primitives) {
+            for (const QJsonValue &primitiveValue : primitives) {
+                if (!primitiveValue.isObject())
+                    continue;
+                const QJsonObject primitive = primitiveValue.toObject();
+                if (!primitive.contains(QStringLiteral("id")))
+                    continue;
+                const QUuid id(
+                    primitive.value(QStringLiteral("id")).toString());
+                if (primitiveIds.contains(id))
+                    return QStringLiteral("duplicate primitive id");
+                primitiveIds.insert(id);
+            }
+            return QString();
+        };
+
+    if (!hasLayers) {
+        return validatePrimitives(
+            json.value(QStringLiteral("primitives")).toArray());
+    }
+
+    for (const QJsonValue &layerValue :
+         json.value(QStringLiteral("layers")).toArray()) {
+        if (!layerValue.isObject())
+            continue;
+        const QJsonObject layer = layerValue.toObject();
+        if (layer.contains(QStringLiteral("id"))) {
+            const QUuid id(layer.value(QStringLiteral("id")).toString());
+            if (layerIds.contains(id))
+                return QStringLiteral("duplicate layer id");
+            layerIds.insert(id);
+        }
+        const QString primitiveError = validatePrimitives(
+            layer.value(QStringLiteral("primitives")).toArray());
+        if (!primitiveError.isEmpty())
+            return primitiveError;
+    }
+    return {};
+}
+
 QString validateProjectBudgets(const QJsonObject &json, bool hasLayers)
 {
     qint64 totalPrimitives = 0;
@@ -63,6 +166,9 @@ QString validateProjectBudgets(const QJsonObject &json, bool hasLayers)
             return QStringLiteral("invalid layer entry");
 
         const QJsonObject layer = layerValue.toObject();
+        const QString metadataError = validateLayerMetadata(layer);
+        if (!metadataError.isEmpty())
+            return metadataError;
         if (layer.contains(QStringLiteral("primitives"))
             && !layer.value(QStringLiteral("primitives")).isArray()) {
             return QStringLiteral("invalid layer primitives");
@@ -143,6 +249,9 @@ bool ProjectFileService::saveToFile(const QString& fileName, bool updateSession)
                 }
             }
             layerObj["primitives"] = primitivesArray;
+            const QString metadataError = validateLayerMetadata(layerObj);
+            if (!metadataError.isEmpty())
+                return fail(metadataError);
             layersArray.append(layerObj);
         }
     }
@@ -155,8 +264,15 @@ bool ProjectFileService::saveToFile(const QString& fileName, bool updateSession)
         canvasObj["paperColor"] = m_host.canvas->paperColor().name(QColor::HexArgb);
         canvasObj["gridVisible"] = m_host.canvas->isGridVisible();
         canvasObj["snapEnabled"] = m_host.canvas->isSnapEnabled();
+        const QString canvasError = validateCanvasMetadata(canvasObj);
+        if (!canvasError.isEmpty())
+            return fail(canvasError);
         json["canvas"] = canvasObj;
     }
+
+    const QString identityError = validateProjectIdentities(json, true);
+    if (!identityError.isEmpty())
+        return fail(identityError);
 
     const QByteArray payload = QJsonDocument(json).toJson();
     if (payload.isEmpty())
@@ -270,9 +386,19 @@ bool ProjectFileService::loadFromFile(const QString& fileName,
         && !json.value(QStringLiteral("canvas")).isObject()) {
         return fail(QStringLiteral("invalid canvas settings"));
     }
+    if (json.contains(QStringLiteral("canvas"))) {
+        const QString canvasError =
+            validateCanvasMetadata(json.value(QStringLiteral("canvas")).toObject());
+        if (!canvasError.isEmpty())
+            return fail(canvasError);
+    }
     const QString budgetError = validateProjectBudgets(json, hasLayers);
     if (!budgetError.isEmpty())
         return fail(budgetError);
+    const QString identityError =
+        validateProjectIdentities(json, hasLayers);
+    if (!identityError.isEmpty())
+        return fail(identityError);
 
     // Struct to hold parsed results from worker thread
     struct ParsedLayer {

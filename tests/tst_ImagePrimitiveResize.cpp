@@ -19,6 +19,7 @@ private slots:
   void maskStateRoundTripsAndSettingsAreBounded();
   void missingMaskStateClearsPreviousValues();
   void malformedMaskSelectionIsFiltered();
+  void malformedSerializedMaskPayloadIsRejected();
   void invalidSerializedImageIsRejected();
   void oversizedSerializedImageDimensionsAreRejected();
 };
@@ -301,6 +302,46 @@ void tst_ImagePrimitiveResize::malformedMaskSelectionIsFiltered()
   QCOMPARE(primitive.selectedMaskIndices(), std::vector<int>({1}));
   QCOMPARE(primitive.getEditableContour().size(), static_cast<size_t>(3));
   QCOMPARE(primitive.getEditableContour().front(), QPointF(0.0f, 0.0f));
+}
+
+void tst_ImagePrimitiveResize::malformedSerializedMaskPayloadIsRejected()
+{
+  QJsonObject json = imageJsonWithMasks();
+  QCOMPARE(DrawingPrimitive::serializedPointCount(json), qsizetype(9));
+  QVERIFY(DrawingPrimitive::createFromJson(json));
+
+  QJsonArray candidates = json["maskCandidates"].toArray();
+  QJsonObject candidate = candidates[0].toObject();
+  candidate["score"] = QStringLiteral("high");
+  candidates[0] = candidate;
+  json["maskCandidates"] = candidates;
+  QVERIFY(!DrawingPrimitive::createFromJson(json));
+
+  json = imageJsonWithMasks();
+  QJsonArray contour = json["maskContour"].toArray();
+  QJsonObject point = contour[0].toObject();
+  point["x"] = QStringLiteral("left");
+  contour[0] = point;
+  json["maskContour"] = contour;
+  QVERIFY(!DrawingPrimitive::createFromJson(json));
+
+  json = imageJsonWithMasks();
+  QJsonArray selected;
+  selected.append(99);
+  json["selectedMaskIndices"] = selected;
+  QVERIFY(!DrawingPrimitive::createFromJson(json));
+
+  QJsonObject validPoint;
+  validPoint["x"] = 0.0;
+  validPoint["y"] = 0.0;
+  QJsonArray oversizedContour;
+  for (qsizetype i = 0;
+       i <= ImagePrimitive::kMaxSerializedMaskPoints; ++i) {
+    oversizedContour.append(validPoint);
+  }
+  json = imageJsonWithMasks();
+  json["maskContour"] = oversizedContour;
+  QVERIFY(!DrawingPrimitive::createFromJson(json));
 }
 
 void tst_ImagePrimitiveResize::invalidSerializedImageIsRejected()

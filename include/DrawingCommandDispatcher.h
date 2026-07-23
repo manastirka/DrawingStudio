@@ -74,6 +74,7 @@ private:
                              const QColor &defaultColor = Qt::black);
     static double getDouble(const QJsonObject &p, const QString &key, double def = 0.0);
     static bool getBool(const QJsonObject &p, const QString &key, bool def = false);
+    static QString validateAutomationParams(const QJsonObject &params);
 
     bool exportCanvasToFileHost(const QString &path, const QString &format = QString(),
                                 int quality = -1);

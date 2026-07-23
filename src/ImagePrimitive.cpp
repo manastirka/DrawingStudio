@@ -15,12 +15,6 @@
 
 namespace {
 constexpr float kMinImageDimension = 1.0f;
-constexpr int kMaxContourSmoothness = 32;
-constexpr int kMaxMaskFeather = 30;
-constexpr int kMaxMaskBlur = 20;
-constexpr int kMaxMaskExpand = 20;
-constexpr qsizetype kMaxSerializedMaskCandidates = 4096;
-constexpr qsizetype kMaxSerializedContourPoints = 1000000;
 constexpr qsizetype kMaxSerializedImageBytes = 64 * 1024 * 1024;
 constexpr int kMaxSerializedImageDimension = 16384;
 constexpr qint64 kMaxSerializedImagePixels = 64LL * 1024LL * 1024LL;
@@ -407,7 +401,8 @@ void ImagePrimitive::setMaskExpand(int amount) {
 
 // --- setPosition ---
 void ImagePrimitive::setPosition(const QVector2D &position) {
-  m_position = position;
+  if (isSupportedPoint(position))
+    m_position = position;
 }
 
 
@@ -452,7 +447,10 @@ void ImagePrimitive::setSize(const QVector2D &size) {
 
 
 // --- setRotation ---
-void ImagePrimitive::setRotation(float rotation) { m_rotation = rotation; }
+void ImagePrimitive::setRotation(float rotation) {
+  if (std::isfinite(rotation))
+    m_rotation = std::clamp(rotation, -3600.0f, 3600.0f);
+}
 
 
 // --- getResizeHandleAt ---
@@ -703,7 +701,7 @@ void ImagePrimitive::fromJson(const QJsonObject &json) {
   if (json["maskContour"].isArray()) {
     const QJsonArray contourArray = json["maskContour"].toArray();
     const qsizetype pointCount =
-        std::min(contourArray.size(), kMaxSerializedContourPoints);
+        std::min(contourArray.size(), kMaxSerializedMaskPoints);
     m_detectedSubject.contour.reserve(static_cast<size_t>(pointCount));
     for (qsizetype i = 0; i < pointCount; ++i) {
       const QJsonValue pointValue = contourArray.at(i);
@@ -736,7 +734,7 @@ void ImagePrimitive::fromJson(const QJsonObject &json) {
       candidate.area_percent = candObj["area_percent"].toDouble();
       const QJsonArray candContour = candObj["contour"].toArray();
       const qsizetype contourPointCount =
-          std::min(candContour.size(), kMaxSerializedContourPoints);
+          std::min(candContour.size(), kMaxSerializedMaskPoints);
       candidate.contour.reserve(static_cast<size_t>(contourPointCount));
       for (qsizetype pointIndex = 0; pointIndex < contourPointCount;
            ++pointIndex) {

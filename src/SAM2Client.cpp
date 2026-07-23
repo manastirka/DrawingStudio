@@ -7,6 +7,7 @@
 #include <QJsonParseError>
 #include <QHostAddress>
 #include <QTimer>
+#include <cmath>
 
 namespace {
 constexpr int kHealthTimeoutMs = 2000;
@@ -19,6 +20,8 @@ QByteArray g_authToken;
 
 constexpr const char *kTimedOutProperty = "sam2_timed_out";
 constexpr const char *kTimeoutContextProperty = "sam2_timeout_context";
+constexpr const char *kOversizedProperty = "sam2_response_oversized";
+constexpr const char *kResponseContextProperty = "sam2_response_context";
 
 void attachTimeout(QNetworkReply *reply, int timeoutMs,
                    const QString &context) {
@@ -44,6 +47,30 @@ void attachTimeout(QNetworkReply *reply, int timeoutMs,
   timer->start();
 }
 
+void attachResponseLimit(QNetworkReply *reply, qint64 maxBytes,
+                         const QString &context) {
+  if (!reply || maxBytes <= 0)
+    return;
+  const auto enforce = [reply, maxBytes, context](qint64 received) {
+    if (received <= maxBytes
+        || reply->property(kOversizedProperty).toBool()) {
+      return;
+    }
+    reply->setProperty(kOversizedProperty, true);
+    reply->setProperty(kResponseContextProperty, context);
+    qWarning() << "SAM2:" << context << "response exceeds" << maxBytes
+               << "bytes; aborting";
+    reply->abort();
+  };
+  QObject::connect(reply, &QNetworkReply::downloadProgress, reply,
+                   [enforce](qint64 received, qint64) {
+                     enforce(received);
+                   });
+  QObject::connect(reply, &QIODevice::readyRead, reply, [reply, enforce]() {
+    enforce(reply->bytesAvailable());
+  });
+}
+
 QString timeoutErrorMessage(const QNetworkReply *reply) {
   if (!reply) {
     return {};
@@ -58,6 +85,16 @@ QString timeoutErrorMessage(const QNetworkReply *reply) {
     return QString("%1 request timed out").arg(context);
   }
   return QStringLiteral("Request timed out");
+}
+
+QString responseLimitErrorMessage(const QNetworkReply *reply) {
+  if (!reply || !reply->property(kOversizedProperty).toBool())
+    return {};
+  const QString context =
+      reply->property(kResponseContextProperty).toString();
+  return context.isEmpty()
+             ? QStringLiteral("Response exceeds the size limit")
+             : context + QStringLiteral(" response exceeds the size limit");
 }
 
 bool parseJsonObject(const QByteArray &data, QJsonObject &out,
@@ -137,11 +174,18 @@ void SAM2Client::checkHealth() {
 
   QNetworkReply *reply = m_networkManager->get(request);
   attachTimeout(reply, kHealthTimeoutMs, "Health check");
+  attachResponseLimit(reply, kMaxHealthResponseBytes, "Health check");
 
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
     const QString timeoutMsg = timeoutErrorMessage(reply);
     if (!timeoutMsg.isEmpty()) {
       emit healthCheckComplete(false, timeoutMsg);
+      reply->deleteLater();
+      return;
+    }
+    const QString limitMsg = responseLimitErrorMessage(reply);
+    if (!limitMsg.isEmpty()) {
+      emit healthCheckComplete(false, limitMsg);
       reply->deleteLater();
       return;
     }
@@ -200,6 +244,7 @@ void SAM2Client::segmentImage(const QImage &image) {
 
   QNetworkReply *reply = m_networkManager->post(request, data);
   attachTimeout(reply, kSegmentationTimeoutMs, "Segmentation");
+  attachResponseLimit(reply, kMaxSegmentationResponseBytes, "Segmentation");
 
   // Start progress polling
   QTimer *progressTimer = new QTimer(this);
@@ -211,6 +256,7 @@ void SAM2Client::segmentImage(const QImage &image) {
     authorizeRequest(progressRequest);
     QNetworkReply *progressReply = m_networkManager->get(progressRequest);
     attachTimeout(progressReply, kProgressTimeoutMs, "Progress");
+    attachResponseLimit(progressReply, kMaxHealthResponseBytes, "Progress");
 
     connect(progressReply, &QNetworkReply::finished, this,
             [this, progressReply]() {
@@ -262,6 +308,8 @@ void SAM2Client::segmentHumans(const QImage &image) {
 
   QNetworkReply *reply = m_networkManager->post(request, data);
   attachTimeout(reply, kSegmentationTimeoutMs, "Human detection");
+  attachResponseLimit(reply, kMaxSegmentationResponseBytes,
+                      "Human detection");
 
   connect(reply, &QNetworkReply::finished, this, [this, reply]() {
     qDebug() << "SAM2: Human detection response received";
@@ -295,6 +343,8 @@ void SAM2Client::segmentWithPoint(const QImage &image, const QPointF &point) {
 
   QNetworkReply *reply = m_networkManager->post(request, data);
   attachTimeout(reply, kSegmentationTimeoutMs, "Point segmentation");
+  attachResponseLimit(reply, kMaxSegmentationResponseBytes,
+                      "Point segmentation");
 
   connect(reply, &QNetworkReply::finished, this,
           [this, reply]() { handleSegmentationResponse(reply); });
@@ -320,6 +370,8 @@ void SAM2Client::segmentWithBox(const QImage &image, const QRectF &box) {
 
   QNetworkReply *reply = m_networkManager->post(request, data);
   attachTimeout(reply, kSegmentationTimeoutMs, "Box segmentation");
+  attachResponseLimit(reply, kMaxSegmentationResponseBytes,
+                      "Box segmentation");
 
   connect(reply, &QNetworkReply::finished, this,
           [this, reply]() { handleSegmentationResponse(reply); });
@@ -329,6 +381,12 @@ void SAM2Client::handleAllObjectsResponse(QNetworkReply *reply) {
   const QString timeoutMsg = timeoutErrorMessage(reply);
   if (!timeoutMsg.isEmpty()) {
     emit segmentationFailed(timeoutMsg);
+    reply->deleteLater();
+    return;
+  }
+  const QString limitMsg = responseLimitErrorMessage(reply);
+  if (!limitMsg.isEmpty()) {
+    emit segmentationFailed(limitMsg);
     reply->deleteLater();
     return;
   }
@@ -399,13 +457,27 @@ void SAM2Client::handleAllObjectsResponse(QNetworkReply *reply) {
       qDebug() << "SAM2: Found" << totalFound << "objects, returning top"
                << objects.size();
 
+      if (objects.size() > kMaxResponseCandidates) {
+        emit segmentationFailed(
+            QStringLiteral("SAM2 response contains too many candidates"));
+        reply->deleteLater();
+        return;
+      }
+
       if (!objects.isEmpty()) {
         // Parse ALL candidates for user selection
         MultiSegmentationResult multiResult;
         multiResult.success = true;
         multiResult.total_found = totalFound;
 
+        qsizetype totalContourPoints = 0;
         for (const QJsonValue &objVal : objects) {
+          if (!objVal.isObject()) {
+            emit segmentationFailed(
+                QStringLiteral("Invalid mask candidate in response"));
+            reply->deleteLater();
+            return;
+          }
           QJsonObject candidateObj = objVal.toObject();
 
           MaskCandidate candidate;
@@ -417,12 +489,27 @@ void SAM2Client::handleAllObjectsResponse(QNetworkReply *reply) {
 
           // Parse contour - keep original order
           QJsonArray contourArray = candidateObj["contour"].toArray();
+          if (contourArray.size()
+              > kMaxResponseContourPoints - totalContourPoints) {
+            emit segmentationFailed(
+                QStringLiteral("SAM2 response contour exceeds the limit"));
+            reply->deleteLater();
+            return;
+          }
+          totalContourPoints += contourArray.size();
           for (const QJsonValue &pointVal : contourArray) {
             QJsonArray point = pointVal.toArray();
-            if (point.size() >= 2) {
-              candidate.contour.push_back(
-                  QPointF(point[0].toDouble(), point[1].toDouble()));
+            if (point.size() < 2 || !point[0].isDouble()
+                || !point[1].isDouble()
+                || !std::isfinite(point[0].toDouble())
+                || !std::isfinite(point[1].toDouble())) {
+              emit segmentationFailed(
+                  QStringLiteral("Invalid contour point in response"));
+              reply->deleteLater();
+              return;
             }
+            candidate.contour.push_back(
+                QPointF(point[0].toDouble(), point[1].toDouble()));
           }
 
           // Decode per-pixel mask (detection resolution) for precise cutouts
@@ -432,6 +519,12 @@ void SAM2Client::handleAllObjectsResponse(QNetworkReply *reply) {
             int height = shapeArray[0].toInt();
             int width = shapeArray[1].toInt();
             candidate.mask = base64ToMask(maskB64, width, height);
+            if (candidate.mask.isNull()) {
+              emit segmentationFailed(
+                  QStringLiteral("Invalid candidate mask data in response"));
+              reply->deleteLater();
+              return;
+            }
           }
 
           multiResult.candidates.push_back(candidate);
@@ -464,6 +557,12 @@ void SAM2Client::handleSegmentationResponse(QNetworkReply *reply) {
   const QString timeoutMsg = timeoutErrorMessage(reply);
   if (!timeoutMsg.isEmpty()) {
     emit segmentationFailed(timeoutMsg);
+    reply->deleteLater();
+    return;
+  }
+  const QString limitMsg = responseLimitErrorMessage(reply);
+  if (!limitMsg.isEmpty()) {
+    emit segmentationFailed(limitMsg);
     reply->deleteLater();
     return;
   }
@@ -510,12 +609,23 @@ void SAM2Client::handleSegmentationResponse(QNetworkReply *reply) {
 
       // Parse contour
       QJsonArray contourArray = obj["contour"].toArray();
+      if (contourArray.size() > kMaxResponseContourPoints) {
+        emit segmentationFailed("Response contour exceeds the limit");
+        reply->deleteLater();
+        return;
+      }
       for (const QJsonValue &pointVal : contourArray) {
         QJsonArray point = pointVal.toArray();
-        if (point.size() >= 2) {
-          result.contour.push_back(
-              QPointF(point[0].toDouble(), point[1].toDouble()));
+        if (point.size() < 2 || !point[0].isDouble()
+            || !point[1].isDouble()
+            || !std::isfinite(point[0].toDouble())
+            || !std::isfinite(point[1].toDouble())) {
+          emit segmentationFailed("Invalid contour point in response");
+          reply->deleteLater();
+          return;
         }
+        result.contour.push_back(
+            QPointF(point[0].toDouble(), point[1].toDouble()));
       }
 
       if (result.contour.empty()) {
@@ -558,7 +668,9 @@ QByteArray SAM2Client::imageToBase64(const QImage &image) {
 }
 
 QImage SAM2Client::base64ToMask(const QString &base64, int width, int height) {
-  if (width <= 0 || height <= 0) {
+  const qint64 expectedSize = static_cast<qint64>(width) * height;
+  if (width <= 0 || height <= 0 || expectedSize <= 0
+      || expectedSize > kMaxMaskPixels) {
     qWarning() << "SAM2: Invalid mask dimensions" << width << "x" << height;
     return {};
   }
@@ -567,8 +679,11 @@ QImage SAM2Client::base64ToMask(const QString &base64, int width, int height) {
     return {};
   }
 
-  QByteArray maskData = QByteArray::fromBase64(base64.toUtf8());
-  const int expectedSize = width * height;
+  const auto decoded = QByteArray::fromBase64Encoding(
+      base64.toUtf8(), QByteArray::AbortOnBase64DecodingErrors);
+  if (!decoded)
+    return {};
+  const QByteArray &maskData = decoded.decoded;
 
   if (maskData.size() != expectedSize) {
     qWarning() << "SAM2: Mask size mismatch. Expected:" << expectedSize
@@ -577,8 +692,11 @@ QImage SAM2Client::base64ToMask(const QString &base64, int width, int height) {
   }
 
   QImage mask(width, height, QImage::Format_Grayscale8);
+  if (mask.isNull())
+    return {};
   mask.fill(Qt::black);
-  memcpy(mask.bits(), maskData.constData(), expectedSize);
+  memcpy(mask.bits(), maskData.constData(),
+         static_cast<size_t>(expectedSize));
 
   return mask;
 }

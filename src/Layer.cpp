@@ -1,6 +1,7 @@
 #include "Layer.h"
 #include "DrawingPrimitive.h"
 #include <algorithm>
+#include <cmath>
 
 Layer::Layer(const QString& name)
     : m_id(QUuid::createUuid())
@@ -48,7 +49,8 @@ void Layer::setLocked(bool locked)
 
 void Layer::setOpacity(float opacity)
 {
-    m_opacity = std::clamp(opacity, 0.0f, 1.0f);
+    if (std::isfinite(opacity))
+        m_opacity = std::clamp(opacity, 0.0f, 1.0f);
 }
 
 void Layer::setColor(const QColor& color)

@@ -9,6 +9,8 @@
 #include <QJsonArray>
 #include <QPainter>
 #include <Qt>
+#include <algorithm>
+#include <cmath>
 #include <vector>
 #include <memory>
 
@@ -37,6 +39,11 @@ public:
     static constexpr float kMaxLineWidth = 1000.0f;
     static constexpr float kMaxShadowBlur = 1000.0f;
     static constexpr float kMaxShadowOffset = 10000.0f;
+    static bool isSupportedPoint(const QVector2D &point) {
+        return std::isfinite(point.x()) && std::isfinite(point.y())
+            && std::abs(point.x()) <= kMaxSerializedCoordinateMagnitude
+            && std::abs(point.y()) <= kMaxSerializedCoordinateMagnitude;
+    }
 
     explicit DrawingPrimitive(PrimitiveType type = PrimitiveType::Line, QObject* parent = nullptr);
     virtual ~DrawingPrimitive() = default;
@@ -188,15 +195,19 @@ public:
     
     QVector2D startPoint() const { return m_start; }
     QVector2D endPoint() const { return m_end; }
-    void setStartPoint(const QVector2D &point) { m_start = point; }
-    void setEndPoint(const QVector2D &point) { m_end = point; }
+    void setStartPoint(const QVector2D &point) {
+        if (isSupportedPoint(point)) m_start = point;
+    }
+    void setEndPoint(const QVector2D &point) {
+        if (isSupportedPoint(point)) m_end = point;
+    }
 
     // Angle-line chain: slide moves along the previously connected segment
     QUuid connectedLineId() const { return m_connectedLineId; }
     void setConnectedLineId(const QUuid &id) { m_connectedLineId = id; }
     QVector2D moveConstraintDirection() const { return m_moveConstraintDirection; }
     void setMoveConstraintDirection(const QVector2D &dir) {
-        m_moveConstraintDirection = dir;
+        if (isSupportedPoint(dir)) m_moveConstraintDirection = dir;
     }
     
 private:
@@ -225,14 +236,23 @@ public:
     
     QVector2D topLeft() const { return m_topLeft; }
     QVector2D bottomRight() const { return m_bottomRight; }
-    void setTopLeft(const QVector2D &point) { m_topLeft = point; }
-    void setBottomRight(const QVector2D &point) { m_bottomRight = point; }
+    void setTopLeft(const QVector2D &point) {
+        if (isSupportedPoint(point)) m_topLeft = point;
+    }
+    void setBottomRight(const QVector2D &point) {
+        if (isSupportedPoint(point)) m_bottomRight = point;
+    }
     
     bool filled() const { return m_filled; }
     void setFilled(bool filled) { m_filled = filled; }
     
     float cornerRadius() const { return m_cornerRadius; }
-    void setCornerRadius(float radius) { m_cornerRadius = radius; }
+    void setCornerRadius(float radius) {
+        if (std::isfinite(radius))
+            m_cornerRadius = std::clamp(
+                radius, 0.0f,
+                static_cast<float>(kMaxSerializedCoordinateMagnitude));
+    }
     
     bool maintainAspectRatio() const { return m_maintainAspectRatio; }
     void setMaintainAspectRatio(bool maintain) { m_maintainAspectRatio = maintain; }
@@ -272,16 +292,30 @@ public:
     QVector2D center() const { return m_center; }
     float radiusX() const { return m_radiusX; }
     float radiusY() const { return m_radiusY; }
-    void setCenter(const QVector2D &center) { m_center = center; }
-    void setRadiusX(float radius) { m_radiusX = radius; }
-    void setRadiusY(float radius) { m_radiusY = radius; }
+    void setCenter(const QVector2D &center) {
+        if (isSupportedPoint(center)) m_center = center;
+    }
+    void setRadiusX(float radius) {
+        if (std::isfinite(radius))
+            m_radiusX = std::clamp(
+                radius, 0.0f,
+                static_cast<float>(kMaxSerializedCoordinateMagnitude));
+    }
+    void setRadiusY(float radius) {
+        if (std::isfinite(radius))
+            m_radiusY = std::clamp(
+                radius, 0.0f,
+                static_cast<float>(kMaxSerializedCoordinateMagnitude));
+    }
     
     bool filled() const { return m_filled; }
     void setFilled(bool filled) { m_filled = filled; }
     
     // Visual properties
     int subdivisions() const { return m_subdivisions; }
-    void setSubdivisions(int subdivisions) { m_subdivisions = subdivisions; }
+    void setSubdivisions(int subdivisions) {
+        m_subdivisions = std::clamp(subdivisions, 4, 4096);
+    }
     
     bool showAxes() const { return m_showAxes; }
     void setShowAxes(bool show) { m_showAxes = show; }
@@ -438,7 +472,8 @@ public:
     
     float smoothness() const { return m_smoothness; }
     void setSmoothness(float smoothness) {
-        m_smoothness = qBound(0.0f, smoothness, 1.0f);
+        if (std::isfinite(smoothness))
+            m_smoothness = qBound(0.0f, smoothness, 1.0f);
     }
     
     int interpolationType() const { return m_interpolationType; }
@@ -448,7 +483,8 @@ public:
     
     float tension() const { return m_tension; }
     void setTension(float tension) {
-        m_tension = qBound(0.0f, tension, 1.0f);
+        if (std::isfinite(tension))
+            m_tension = qBound(0.0f, tension, 1.0f);
     }
     
     bool autoSmooth() const { return m_autoSmooth; }
@@ -491,16 +527,29 @@ public:
     void setControlPointPosition(int index, const QVector2D& position) override;
     
     QVector2D center() const { return m_center; }
-    void setCenter(const QVector2D &center) { m_center = center; }
+    void setCenter(const QVector2D &center) {
+        if (isSupportedPoint(center)) m_center = center;
+    }
     
     float radius() const { return m_radius; }
-    void setRadius(float radius) { m_radius = radius; }
+    void setRadius(float radius) {
+        if (std::isfinite(radius))
+            m_radius = std::clamp(
+                radius, 0.0f,
+                static_cast<float>(kMaxSerializedCoordinateMagnitude));
+    }
     
     float startAngle() const { return m_startAngle; }
-    void setStartAngle(float angle) { m_startAngle = angle; }
+    void setStartAngle(float angle) {
+        if (std::isfinite(angle))
+            m_startAngle = std::clamp(angle, -3600.0f, 3600.0f);
+    }
     
     float endAngle() const { return m_endAngle; }
-    void setEndAngle(float angle) { m_endAngle = angle; }
+    void setEndAngle(float angle) {
+        if (std::isfinite(angle))
+            m_endAngle = std::clamp(angle, -3600.0f, 3600.0f);
+    }
     
     QVector2D startPoint() const;
     QVector2D endPoint() const;
@@ -531,10 +580,17 @@ public:
     void setControlPointPosition(int index, const QVector2D& position) override;
     
     QVector2D center() const { return m_center; }
-    void setCenter(const QVector2D &center) { m_center = center; }
+    void setCenter(const QVector2D &center) {
+        if (isSupportedPoint(center)) m_center = center;
+    }
     
     float radius() const { return m_radius; }
-    void setRadius(float radius) { m_radius = radius; }
+    void setRadius(float radius) {
+        if (std::isfinite(radius))
+            m_radius = std::clamp(
+                radius, 0.0f,
+                static_cast<float>(kMaxSerializedCoordinateMagnitude));
+    }
     
     bool filled() const { return m_filled; }
     void setFilled(bool filled) { m_filled = filled; }
@@ -608,12 +664,22 @@ public:
     
     QVector2D startPoint() const { return m_start; }
     QVector2D endPoint() const { return m_end; }
-    void setStartPoint(const QVector2D &point) { m_start = point; }
-    void setEndPoint(const QVector2D &point) { m_end = point; }
+    void setStartPoint(const QVector2D &point) {
+        if (isSupportedPoint(point)) m_start = point;
+    }
+    void setEndPoint(const QVector2D &point) {
+        if (isSupportedPoint(point)) m_end = point;
+    }
     
     // Dimension-specific properties
     void setUnitsString(const QString &units) { m_unitsString = units; }
-    void setMeasurementValue(float value) { m_measurementValue = value; }
+    void setMeasurementValue(float value) {
+        if (std::isfinite(value))
+            m_measurementValue = std::clamp(
+                value,
+                -static_cast<float>(kMaxSerializedCoordinateMagnitude),
+                static_cast<float>(kMaxSerializedCoordinateMagnitude));
+    }
     void setPixelsPerUnit(float ppu);
     float pixelsPerUnit() const { return m_pixelsPerUnit; }
     /// Length in display units, always derived from geometry.
@@ -645,6 +711,10 @@ private:
 class TextPrimitive : public DrawingPrimitive
 {
 public:
+    static constexpr qsizetype kMaxTextCharacters = 1000000;
+    static constexpr qsizetype kMaxFontFamilyCharacters = 1024;
+    static constexpr float kMaxFontSize = 10000.0f;
+
     TextPrimitive(const QVector2D &position = QVector2D(), const QString &text = "Text");
     
     void render(QPainter* painter) const override;
@@ -657,16 +727,25 @@ public:
     
     // Text-specific properties
     QString text() const { return m_text; }
-    void setText(const QString &text) { m_text = text; }
+    void setText(const QString &text) {
+        m_text = text.left(kMaxTextCharacters);
+    }
     
     QVector2D position() const { return m_position; }
-    void setPosition(const QVector2D &position) { m_position = position; }
+    void setPosition(const QVector2D &position) {
+        if (isSupportedPoint(position)) m_position = position;
+    }
     
     QString fontFamily() const { return m_fontFamily; }
-    void setFontFamily(const QString &family) { m_fontFamily = family; }
+    void setFontFamily(const QString &family) {
+        m_fontFamily = family.left(kMaxFontFamilyCharacters);
+    }
     
     float fontSize() const { return m_fontSize; }
-    void setFontSize(float size) { m_fontSize = size; }
+    void setFontSize(float size) {
+        if (std::isfinite(size))
+            m_fontSize = std::clamp(size, 1.0f, kMaxFontSize);
+    }
     
     bool isBold() const { return m_bold; }
     void setBold(bool bold) { m_bold = bold; }
@@ -684,13 +763,22 @@ public:
     };
 
     BaselineShift baselineShift() const { return m_baselineShift; }
-    void setBaselineShift(BaselineShift shift) { m_baselineShift = shift; }
+    void setBaselineShift(BaselineShift shift) {
+        const int value = static_cast<int>(shift);
+        if (value >= 0 && value <= 2) m_baselineShift = shift;
+    }
     
     float rotation() const { return m_rotation; }
-    void setRotation(float rotation) { m_rotation = rotation; }
+    void setRotation(float rotation) {
+        if (std::isfinite(rotation))
+            m_rotation = std::clamp(rotation, -3600.0f, 3600.0f);
+    }
     
     float scale() const { return m_scale; }
-    void setScale(float scale) { m_scale = scale; }
+    void setScale(float scale) {
+        if (std::isfinite(scale))
+            m_scale = std::clamp(scale, 0.001f, 1000.0f);
+    }
     
     // Text on path properties
     bool followsSpline() const { return m_followsSpline; }
@@ -700,7 +788,13 @@ public:
     void setSplineId(const QUuid& id) { m_splineId = id; }
     
     float pathOffset() const { return m_pathOffset; }
-    void setPathOffset(float offset) { m_pathOffset = offset; }
+    void setPathOffset(float offset) {
+        if (std::isfinite(offset))
+            m_pathOffset = std::clamp(
+                offset,
+                -static_cast<float>(kMaxSerializedCoordinateMagnitude),
+                static_cast<float>(kMaxSerializedCoordinateMagnitude));
+    }
     
     // Text formatting
     enum class TextAlignment {
@@ -711,52 +805,100 @@ public:
     };
     
     TextAlignment alignment() const { return m_alignment; }
-    void setAlignment(TextAlignment align) { m_alignment = align; }
+    void setAlignment(TextAlignment align) {
+        const int value = static_cast<int>(align);
+        if (value >= 0 && value <= 3) m_alignment = align;
+    }
     
     float letterSpacing() const { return m_letterSpacing; }
-    void setLetterSpacing(float spacing) { m_letterSpacing = spacing; }
+    void setLetterSpacing(float spacing) {
+        if (std::isfinite(spacing))
+            m_letterSpacing = std::clamp(spacing, -1000.0f, 1000.0f);
+    }
     
     float lineSpacing() const { return m_lineSpacing; }
-    void setLineSpacing(float spacing) { m_lineSpacing = spacing; }
+    void setLineSpacing(float spacing) {
+        if (std::isfinite(spacing))
+            m_lineSpacing = std::clamp(spacing, 0.01f, 100.0f);
+    }
     
     // Text box dimensions
     float textBoxWidth() const { return m_textBoxWidth; }
-    void setTextBoxWidth(float width) { m_textBoxWidth = width; }
+    void setTextBoxWidth(float width) {
+        if (std::isfinite(width))
+            m_textBoxWidth = std::clamp(
+                width, 0.0f,
+                static_cast<float>(kMaxSerializedCoordinateMagnitude));
+    }
     
     float textBoxHeight() const { return m_textBoxHeight; }
-    void setTextBoxHeight(float height) { m_textBoxHeight = height; }
+    void setTextBoxHeight(float height) {
+        if (std::isfinite(height))
+            m_textBoxHeight = std::clamp(
+                height, 0.0f,
+                static_cast<float>(kMaxSerializedCoordinateMagnitude));
+    }
     
     // Text effects
     bool shadowEnabled() const { return m_dropShadow.enabled; }
     void setShadowEnabled(bool enabled) { m_dropShadow.enabled = enabled; }
     QColor shadowColor() const { return m_dropShadow.color; }
-    void setShadowColor(const QColor& color) { m_dropShadow.color = color; }
+    void setShadowColor(const QColor& color) {
+        if (color.isValid()) m_dropShadow.color = color;
+    }
     float shadowOffsetX() const { return m_dropShadow.offsetX; }
-    void setShadowOffsetX(float x) { m_dropShadow.offsetX = x; }
+    void setShadowOffsetX(float x) {
+        if (std::isfinite(x))
+            m_dropShadow.offsetX = std::clamp(x, -10000.0f, 10000.0f);
+    }
     float shadowOffsetY() const { return m_dropShadow.offsetY; }
-    void setShadowOffsetY(float y) { m_dropShadow.offsetY = y; }
+    void setShadowOffsetY(float y) {
+        if (std::isfinite(y))
+            m_dropShadow.offsetY = std::clamp(y, -10000.0f, 10000.0f);
+    }
     float shadowBlur() const { return m_dropShadow.blur; }
-    void setShadowBlur(float blur) { m_dropShadow.blur = blur; }
+    void setShadowBlur(float blur) {
+        if (std::isfinite(blur))
+            m_dropShadow.blur = std::clamp(blur, 0.0f, 1000.0f);
+    }
     float shadowAngle() const { return m_dropShadow.angle; }
-    void setShadowAngle(float angle) { m_dropShadow.angle = angle; }
+    void setShadowAngle(float angle) {
+        if (std::isfinite(angle))
+            m_dropShadow.angle = std::clamp(angle, -360.0f, 360.0f);
+    }
     float shadowDistance() const { return m_dropShadow.distance; }
-    void setShadowDistance(float distance) { m_dropShadow.distance = distance; }
+    void setShadowDistance(float distance) {
+        if (std::isfinite(distance))
+            m_dropShadow.distance = std::clamp(distance, 0.0f, 10000.0f);
+    }
     
     bool strokeEnabled() const { return m_stroke.enabled; }
     void setStrokeEnabled(bool enabled) { m_stroke.enabled = enabled; }
     QColor strokeColor() const { return m_stroke.color; }
-    void setStrokeColor(const QColor& color) { m_stroke.color = color; }
+    void setStrokeColor(const QColor& color) {
+        if (color.isValid()) m_stroke.color = color;
+    }
     float strokeWidth() const { return m_stroke.width; }
-    void setStrokeWidth(float width) { m_stroke.width = width; }
+    void setStrokeWidth(float width) {
+        if (std::isfinite(width))
+            m_stroke.width = std::clamp(width, 0.0f, 1000.0f);
+    }
     
     bool gradientEnabled() const { return m_gradient.enabled; }
     void setGradientEnabled(bool enabled) { m_gradient.enabled = enabled; }
     QColor gradientStartColor() const { return m_gradient.startColor; }
-    void setGradientStartColor(const QColor& color) { m_gradient.startColor = color; }
+    void setGradientStartColor(const QColor& color) {
+        if (color.isValid()) m_gradient.startColor = color;
+    }
     QColor gradientEndColor() const { return m_gradient.endColor; }
-    void setGradientEndColor(const QColor& color) { m_gradient.endColor = color; }
+    void setGradientEndColor(const QColor& color) {
+        if (color.isValid()) m_gradient.endColor = color;
+    }
     float gradientAngle() const { return m_gradient.angle; }
-    void setGradientAngle(float angle) { m_gradient.angle = angle; }
+    void setGradientAngle(float angle) {
+        if (std::isfinite(angle))
+            m_gradient.angle = std::clamp(angle, -360.0f, 360.0f);
+    }
     
     // Selection and transformation handles
     void renderSelectionHandles(QPainter* painter) const;

@@ -17,6 +17,7 @@
 #include <QJsonArray>
 #include <QVector2D>
 
+#include <cmath>
 #include <memory>
 #include <vector>
 
@@ -34,8 +35,11 @@ void DrawingCommandDispatcher::setHost(Host host)
 QColor DrawingCommandDispatcher::parseColor(const QJsonObject &p, const QString &key,
                                             const QColor &defaultColor)
 {
-    if (p.contains(key))
-        return QColor(p.value(key).toString());
+    if (p.contains(key)) {
+        const QColor parsed(p.value(key).toString());
+        if (parsed.isValid())
+            return parsed;
+    }
     return defaultColor;
 }
 
@@ -48,9 +52,55 @@ double DrawingCommandDispatcher::getDouble(const QJsonObject &p, const QString &
 
 bool DrawingCommandDispatcher::getBool(const QJsonObject &p, const QString &key, bool def)
 {
-    if (p.contains(key))
+    if (p.contains(key) && p.value(key).isBool())
         return p.value(key).toBool(def);
     return def;
+}
+
+QString DrawingCommandDispatcher::validateAutomationParams(
+    const QJsonObject &params)
+{
+    constexpr int kMaxDepth = 16;
+    constexpr qsizetype kMaxContainerItems = 10000;
+    constexpr qsizetype kMaxStringCharacters = 1000000;
+    constexpr double kMaxNumericMagnitude = 1.0e9;
+
+    std::function<QString(const QJsonValue &, int)> validateValue;
+    validateValue = [&](const QJsonValue &value, int depth) -> QString {
+        if (depth > kMaxDepth)
+            return QStringLiteral("parameter nesting exceeds the limit");
+        if (value.isDouble()) {
+            const double number = value.toDouble();
+            if (!std::isfinite(number)
+                || std::abs(number) > kMaxNumericMagnitude) {
+                return QStringLiteral(
+                    "numeric parameter is outside the supported range");
+            }
+        } else if (value.isString()) {
+            if (value.toString().size() > kMaxStringCharacters)
+                return QStringLiteral("string parameter exceeds the limit");
+        } else if (value.isArray()) {
+            const QJsonArray array = value.toArray();
+            if (array.size() > kMaxContainerItems)
+                return QStringLiteral("array parameter exceeds the limit");
+            for (const QJsonValue &entry : array) {
+                const QString error = validateValue(entry, depth + 1);
+                if (!error.isEmpty())
+                    return error;
+            }
+        } else if (value.isObject()) {
+            const QJsonObject object = value.toObject();
+            if (object.size() > kMaxContainerItems)
+                return QStringLiteral("object parameter exceeds the limit");
+            for (auto it = object.begin(); it != object.end(); ++it) {
+                const QString error = validateValue(it.value(), depth + 1);
+                if (!error.isEmpty())
+                    return error;
+            }
+        }
+        return {};
+    };
+    return validateValue(params, 0);
 }
 
 bool DrawingCommandDispatcher::exportCanvasToFileHost(const QString &path, const QString &format,
@@ -227,6 +277,14 @@ void DrawingCommandDispatcher::execute(const QString &action, const QJsonObject 
         qWarning() << "CommandServer: Unknown action:" << action;
         m_lastResult["success"] = false;
         m_lastResult["error"] = QStringLiteral("Unknown action: %1").arg(action);
+        return;
+    }
+
+    const QString parameterError = validateAutomationParams(params);
+    if (!parameterError.isEmpty()) {
+        m_lastResult["success"] = false;
+        m_lastResult["error"] =
+            QStringLiteral("Invalid parameters: ") + parameterError;
         return;
     }
 

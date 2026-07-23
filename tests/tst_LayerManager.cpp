@@ -3,6 +3,7 @@
 #include "LayerManager.h"
 
 #include <QtTest>
+#include <limits>
 #include <memory>
 
 class tst_LayerManager : public QObject {
@@ -14,6 +15,7 @@ private slots:
     void addPrimitiveToActiveLayer();
     void moveLayerOrdering();
     void clearLayersRestoresDefault();
+    void nonFiniteOpacityIsIgnored();
 };
 
 void tst_LayerManager::defaultLayerExists()
@@ -77,6 +79,19 @@ void tst_LayerManager::clearLayersRestoresDefault()
     mgr.clearLayers();
     QVERIFY(mgr.layerCount() >= 1);
     QVERIFY(mgr.activeLayer() != nullptr);
+}
+
+void tst_LayerManager::nonFiniteOpacityIsIgnored()
+{
+    Layer layer(QStringLiteral("Safe"));
+    layer.setOpacity(0.4f);
+    layer.setOpacity(std::numeric_limits<float>::quiet_NaN());
+    QCOMPARE(layer.opacity(), 0.4f);
+
+    layer.setOpacity(-5.0f);
+    QCOMPARE(layer.opacity(), 0.0f);
+    layer.setOpacity(5.0f);
+    QCOMPARE(layer.opacity(), 1.0f);
 }
 
 QTEST_MAIN(tst_LayerManager)
