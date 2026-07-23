@@ -56,13 +56,14 @@ also require the launch flag `--automation-allow-filesystem`.
 
 | Check | Result | When |
 |-------|--------|------|
-| `cmake --build` + `ctest` (32 tests) | PASS | 2026-07-22 |
+| `cmake --build` + `ctest` (33 tests) | PASS | 2026-07-23 |
 | Command API auth, CORS, body/catalog/batch limits | covered by `tst_CommandServer` | 2026-07-22 |
 | Command catalog/dispatcher parity and required-parameter validation | covered by `tst_CommandServer` + `tst_DrawingCommandDispatcher` | 2026-07-22 |
 | Object align/distribute | covered by `tst_ObjectLayoutOps` | 2026-07-15 |
 | AI connection missing-key paths | covered by `tst_AIImageClient` | 2026-07-15 |
 | AI connection-test drafts remain unsaved; Remote SD URL validation/default | covered by `tst_AIImageClient` | 2026-07-22 |
 | AI generation redirect refusal, deadlines, and 128 MiB response cap | covered by `tst_AIImageClient` | 2026-07-22 |
+| Remote SD same-thread async networking, deadlines, response caps, and strict image decoding | covered by `tst_RemoteSDHelper` | 2026-07-23 |
 | Authenticated command server smoke script | _run after app rebuild_ | — |
 | SAM2 loopback binding, bearer auth, protocol marker, and request limit | covered by SAM2 security tests | 2026-07-22 |
 | SAM2 deadlines, response caps, strict mask decoding, and result budgets | covered by `tst_YOLOIntegration` | 2026-07-23 |

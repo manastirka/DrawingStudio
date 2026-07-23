@@ -643,3 +643,16 @@ target_link_libraries(tst_AIWorkflowController PRIVATE
 add_test(NAME tst_AIWorkflowController COMMAND tst_AIWorkflowController)
 set_tests_properties(tst_AIWorkflowController PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Remote Stable Diffusion networking boundaries and async lifecycle
+add_executable(tst_RemoteSDHelper
+    tst_RemoteSDHelper.cpp
+    ../src/RemoteSDHelper.cpp
+    ../include/RemoteSDHelper.h
+)
+target_include_directories(tst_RemoteSDHelper PRIVATE ../include)
+target_link_libraries(tst_RemoteSDHelper PRIVATE
+    Qt6::Core Qt6::Gui Qt6::Network Qt6::Test)
+add_test(NAME tst_RemoteSDHelper COMMAND tst_RemoteSDHelper)
+set_tests_properties(tst_RemoteSDHelper PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

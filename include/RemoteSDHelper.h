@@ -13,6 +13,14 @@ class RemoteSDHelper : public QObject
     Q_OBJECT
 
 public:
+    static constexpr int kConnectionTimeoutMs = 5000;
+    static constexpr int kGenerationTimeoutMs = 120000;
+    static constexpr qint64 kMaxMetadataResponseBytes = 1024 * 1024;
+    static constexpr qint64 kMaxGenerationResponseBytes = 96 * 1024 * 1024;
+    static constexpr qint64 kMaxDecodedImageBytes = 64 * 1024 * 1024;
+    static constexpr qint64 kMaxImagePixels = 16 * 1024 * 1024;
+    static constexpr int kMaxImageDimension = 8192;
+
     explicit RemoteSDHelper(QObject* parent = nullptr);
     ~RemoteSDHelper();
 
@@ -70,9 +78,16 @@ private:
     bool m_generating;
     
     // Helper methods
+    QNetworkRequest createRequest(const QString& endpoint) const;
+    bool validateGenerationParameters(const QString& prompt,
+                                      int width, int height, int steps,
+                                      float cfgScale,
+                                      QString& errorMessage) const;
     QJsonObject createGenerationRequest(const QString& prompt,
                                        const QString& negativePrompt,
                                        int width, int height,
                                        int steps, float cfgScale, int seed);
+    QImage parseGenerationResponse(const QByteArray& data,
+                                   QString& errorMessage);
     QImage decodeBase64Image(const QString& base64Data);
 };

@@ -195,6 +195,9 @@ AI generation and edit requests time out after three minutes, result downloads
 after one minute, and network responses are capped at 128 MiB. Requests carrying
 provider credentials and Remote SD prompts do not follow redirects; downloaded
 result images may follow only redirects that do not downgrade HTTPS.
+The legacy Remote SD generation helper also stays on its Qt owner thread, uses
+a two-minute request deadline, caps generation responses at 96 MiB, and strictly
+validates returned base64 images before decoding them.
 
 ### Project persistence and recovery
 
